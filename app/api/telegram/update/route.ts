@@ -19,6 +19,28 @@ async function send(chatId: number, payload: Record<string, unknown>) {
   });
 }
 
+async function getAvatarPath(userId: number) {
+  const token = getEnv().TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  try {
+    const photosResponse = await fetch(
+      `https://api.telegram.org/bot${token}/getUserProfilePhotos?user_id=${userId}&limit=1`,
+    );
+    const photos = (await photosResponse.json()) as {
+      ok: boolean;
+      result?: { photos?: Array<Array<{ file_id: string }>> };
+    };
+    const sizes = photos.result?.photos?.[0];
+    const fileId = sizes?.[sizes.length - 1]?.file_id;
+    if (!photos.ok || !fileId) return null;
+    const fileResponse = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+    const file = (await fileResponse.json()) as { ok: boolean; result?: { file_path?: string } };
+    return file.ok ? file.result?.file_path ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   const update = (await request.json()) as TelegramUpdate;
   const message = update.message;
@@ -27,14 +49,16 @@ export async function POST(request: Request) {
 
   const DB = await ensureDatabase();
   const now = new Date().toISOString();
+  const avatarPath = await getAvatarPath(user.id);
   await DB.prepare(
-    `INSERT INTO customers (telegram_id, username, first_name, last_name, phone, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO customers (telegram_id, username, first_name, last_name, phone, avatar_url, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(telegram_id) DO UPDATE SET
        username = excluded.username,
        first_name = excluded.first_name,
        last_name = excluded.last_name,
        phone = COALESCE(excluded.phone, customers.phone),
+       avatar_url = COALESCE(excluded.avatar_url, customers.avatar_url),
        status = 'active',
        updated_at = excluded.updated_at`,
   )
@@ -44,6 +68,7 @@ export async function POST(request: Request) {
       user.first_name,
       user.last_name ?? null,
       message.contact?.phone_number ?? null,
+      avatarPath,
       now,
       now,
     )
