@@ -29,6 +29,8 @@ type Campaign = {
   title: string;
   message: string;
   audience_mode: string;
+  included_tag_ids: string | number[];
+  excluded_tag_ids: string | number[];
   scheduled_at: string | null;
   status: string;
   sent_count: number;
@@ -96,6 +98,24 @@ function niceDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function campaignTagIds(value: string | number[] | null | undefined) {
+  if (Array.isArray(value)) return value.map(Number).filter((id) => Number.isInteger(id) && id > 0);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(Number).filter((id) => Number.isInteger(id) && id > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function datetimeLocal(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized }: { apiBase?: string; authPassword?: string; onUnauthorized?: () => void } = {}) {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
@@ -104,6 +124,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
   const [tagFilter, setTagFilter] = useState<number | "all">("all");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [composer, setComposer] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const apiUrl = useCallback((path: string) => `${apiBase.replace(/\/$/, "")}${path}`, [apiBase]);
@@ -188,7 +209,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
         <header className="topbar">
           <div className="mobile-brand"><span className="brand-mark">P</span> Pulse</div>
           <label className="global-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "chats" ? "Поиск по чатам" : "Поиск по клиентам"} /></label>
-          <button className="primary-button" onClick={() => setComposer(true)}><span>＋</span> Создать рассылку</button>
+          <button className="primary-button" onClick={() => { setEditingCampaign(null); setComposer(true); }}><span>＋</span> Создать рассылку</button>
         </header>
 
         <div className="content">
@@ -232,13 +253,13 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           )}
 
           {view === "segments" && <Segments data={data} action={action} />}
-          {view === "campaigns" && <Campaigns data={data} onCompose={() => setComposer(true)} action={action} />}
+          {view === "campaigns" && <Campaigns data={data} onCompose={() => { setEditingCampaign(null); setComposer(true); }} onEdit={(campaign) => { setEditingCampaign(campaign); setComposer(true); }} action={action} />}
           {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); setNotice("Сообщение отправлено"); }} />}
         </div>
       </section>
 
       {selected && <CustomerPanel customer={selected} tags={data.tags} onClose={() => setSelected(null)} onSave={async (tagIds) => { await action({ action: "set-customer-tags", customerId: selected.id, tagIds }); setNotice("Теги клиента обновлены"); }} />}
-      {composer && <Composer tags={data.tags} onClose={() => setComposer(false)} onCreate={async (payload) => { await action({ action: "create-campaign", ...payload }); setComposer(false); setView("campaigns"); setNotice("Рассылка добавлена в очередь"); }} />}
+      {composer && <Composer key={editingCampaign?.id ?? "new"} tags={data.tags} campaign={editingCampaign} onClose={() => { setComposer(false); setEditingCampaign(null); }} onSave={async (payload) => { await action({ action: editingCampaign ? "update-campaign" : "create-campaign", campaignId: editingCampaign?.id, ...payload }); setComposer(false); setEditingCampaign(null); setView("campaigns"); setNotice(editingCampaign ? "Рассылка обновлена" : "Рассылка добавлена в очередь"); }} />}
     </main>
   );
 }
@@ -312,10 +333,10 @@ function Segments({ data, action }: { data: Dashboard; action: (payload: Record<
   </>;
 }
 
-function Campaigns({ data, onCompose, action }: { data: Dashboard; onCompose: () => void; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
+function Campaigns({ data, onCompose, onEdit, action }: { data: Dashboard; onCompose: () => void; onEdit: (campaign: Campaign) => void; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
   return <>
     <div className="page-heading"><div><span className="eyebrow">Коммуникации</span><h1>Рассылки</h1><p>Моментальные и отложенные сообщения вашей аудитории.</p></div><button className="primary-button desktop-only" onClick={onCompose}>＋ Новая рассылка</button></div>
-    <div className="campaign-list">{data.campaigns.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↗</span><h3>Здесь появятся рассылки</h3><p>Создайте первое сообщение и выберите аудиторию.</p><button className="primary-button" onClick={onCompose}>Создать рассылку</button></div> : data.campaigns.map((campaign) => <article className="campaign-card" key={campaign.id}><div className={`campaign-status status-${campaign.status}`}>{statusLabels[campaign.status] ?? campaign.status}</div><div className="campaign-main"><strong>{campaign.title}</strong><p>{campaign.message}</p><small>{campaign.status === "scheduled" ? `Отправка ${niceDate(campaign.scheduled_at)}` : `Создана ${niceDate(campaign.created_at)}`}</small></div><div className="campaign-stats"><strong>{campaign.sent_count}</strong><small>отправлено</small>{campaign.failed_count > 0 && <em>{campaign.failed_count} ошибок</em>}</div>{campaign.status === "scheduled" && <button className="more-button" aria-label="Отменить рассылку" onClick={() => void action({ action: "cancel-campaign", campaignId: campaign.id })}>×</button>}</article>)}</div>
+    <div className="campaign-list">{data.campaigns.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↗</span><h3>Здесь появятся рассылки</h3><p>Создайте первое сообщение и выберите аудиторию.</p><button className="primary-button" onClick={onCompose}>Создать рассылку</button></div> : data.campaigns.map((campaign) => <article className="campaign-card" key={campaign.id}><div className={`campaign-status status-${campaign.status}`}>{statusLabels[campaign.status] ?? campaign.status}</div><div className="campaign-main"><strong>{campaign.title}</strong><p>{campaign.message}</p><small>{campaign.status === "scheduled" ? `Отправка ${niceDate(campaign.scheduled_at)}` : `Создана ${niceDate(campaign.created_at)}`}</small></div><div className="campaign-stats"><strong>{campaign.sent_count}</strong><small>отправлено</small>{campaign.failed_count > 0 && <em>{campaign.failed_count} ошибок</em>}</div>{campaign.status === "scheduled" && <div className="campaign-actions"><button className="edit-button" onClick={() => onEdit(campaign)}>Редактировать</button><button className="more-button" aria-label="Отменить рассылку" title="Отменить рассылку" onClick={() => void action({ action: "cancel-campaign", campaignId: campaign.id })}>×</button></div>}</article>)}</div>
   </>;
 }
 
@@ -324,9 +345,9 @@ function CustomerPanel({ customer, tags, onClose, onSave }: { customer: Customer
   return <div className="overlay"><aside className="detail-panel"><button className="close-button" onClick={onClose} aria-label="Закрыть">×</button><Avatar customer={customer} large/><h2>{customer.first_name} {customer.last_name}</h2><a href={`https://t.me/${customer.username}`} target="_blank" rel="noreferrer">@{customer.username ?? "без_username"}</a><div className="detail-grid"><div><small>Телефон</small><strong>{customer.phone ?? "Не указан"}</strong></div><div><small>Email</small><strong>{customer.email ?? "Не указан"}</strong></div><div><small>Telegram ID</small><strong>{customer.telegram_id}</strong></div><div><small>В базе с</small><strong>{niceDate(customer.created_at)}</strong></div></div>{customer.quiz && <div className={`quiz-result quiz-result-${customer.quiz.result ?? "active"}`}><small>Анкета «Здоровая спина»</small><strong>{customer.quiz.result === "eligible" ? "Курс подходит" : customer.quiz.result === "consultation" ? "Нужна консультация" : "Анкета не завершена"}</strong>{customer.quiz.details && <p><b>Комментарий клиента:</b><br/>{customer.quiz.details}</p>}</div>}<div className="tag-editor"><h3>Теги клиента</h3>{tags.length === 0 ? <p>Сначала создайте тег в разделе «Сегменты».</p> : tags.map((tag) => <label key={tag.id}><input type="checkbox" checked={selectedTags.includes(tag.id)} onChange={() => setSelectedTags((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}/><span className={`tag tag-${tag.color}`}>{tag.name}</span></label>)}</div><button className="primary-button full" onClick={() => void onSave(selectedTags)}>Сохранить изменения</button></aside></div>;
 }
 
-function Composer({ tags, onClose, onCreate }: { tags: Tag[]; onClose: () => void; onCreate: (payload: Record<string, unknown>) => Promise<void> }) {
-  const [title, setTitle] = useState(""); const [message, setMessage] = useState(""); const [audienceMode, setAudienceMode] = useState("all"); const [included, setIncluded] = useState<number[]>([]); const [excluded, setExcluded] = useState<number[]>([]); const [timing, setTiming] = useState("now"); const [scheduledAt, setScheduledAt] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+function Composer({ tags, campaign, onClose, onSave }: { tags: Tag[]; campaign: Campaign | null; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void> }) {
+  const [title, setTitle] = useState(campaign?.title ?? ""); const [message, setMessage] = useState(campaign?.message ?? ""); const [audienceMode, setAudienceMode] = useState(campaign?.audience_mode ?? "all"); const [included, setIncluded] = useState<number[]>(campaignTagIds(campaign?.included_tag_ids)); const [excluded, setExcluded] = useState<number[]>(campaignTagIds(campaign?.excluded_tag_ids)); const [timing, setTiming] = useState(campaign ? "later" : "now"); const [scheduledAt, setScheduledAt] = useState(datetimeLocal(campaign?.scheduled_at ?? null)); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   function toggle(list: number[], setList: (ids: number[]) => void, id: number) { setList(list.includes(id) ? list.filter((item) => item !== id) : [...list, id]); }
-  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await onCreate({ title, message, audienceMode, includedTagIds: included, excludedTagIds: excluded, sendNow: timing === "now", scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null }); } catch (err) { setError(err instanceof Error ? err.message : "Не удалось создать рассылку"); setBusy(false); } }
-  return <div className="overlay composer-overlay"><form className="composer" onSubmit={submit}><header><div><span className="eyebrow">Новое сообщение</span><h2>Создать рассылку</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body"><label className="field"><span>Название рассылки</span><input required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, напоминание о вебинаре" /></label><label className="field"><span>Сообщение</span><textarea required rows={7} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Напишите текст, который получат клиенты…"/><small>{message.length} символов</small></label><fieldset><legend>Кому отправить</legend><div className="choice-grid"><label className={audienceMode === "all" ? "choice active" : "choice"}><input type="radio" name="audience" checked={audienceMode === "all"} onChange={() => setAudienceMode("all")}/><strong>Вся база</strong><small>Все активные клиенты</small></label><label className={audienceMode === "tags" ? "choice active" : "choice"}><input type="radio" name="audience" checked={audienceMode === "tags"} onChange={() => setAudienceMode("tags")}/><strong>По тегам</strong><small>Только выбранные группы</small></label></div>{audienceMode === "tags" && <div className="tag-choice"><span>Включить теги</span>{tags.map((tag) => <button type="button" className={included.includes(tag.id) ? `tag tag-${tag.color} selected` : "tag"} key={tag.id} onClick={() => toggle(included, setIncluded, tag.id)}>{tag.name}</button>)}</div>}<div className="tag-choice"><span>Исключить теги <small>(необязательно)</small></span>{tags.length ? tags.map((tag) => <button type="button" className={excluded.includes(tag.id) ? "tag excluded selected" : "tag"} key={tag.id} onClick={() => toggle(excluded, setExcluded, tag.id)}>{tag.name}</button>) : <small>Тегов пока нет</small>}</div></fieldset><fieldset><legend>Когда отправить</legend><div className="timing-row"><label><input type="radio" name="timing" checked={timing === "now"} onChange={() => setTiming("now")}/> Сразу</label><label><input type="radio" name="timing" checked={timing === "later"} onChange={() => setTiming("later")}/> По расписанию</label></div>{timing === "later" && <input className="date-input" type="datetime-local" required value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />}</fieldset>{error && <p className="form-error">{error}</p>}</div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Сохраняем…" : timing === "now" ? "Отправить сейчас" : "Запланировать"}</button></footer></form></div>;
+  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await onSave({ title, message, audienceMode, includedTagIds: included, excludedTagIds: excluded, sendNow: timing === "now", scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null }); } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить рассылку"); setBusy(false); } }
+  return <div className="overlay composer-overlay"><form className="composer" onSubmit={submit}><header><div><span className="eyebrow">{campaign ? "Запланированное сообщение" : "Новое сообщение"}</span><h2>{campaign ? "Редактировать рассылку" : "Создать рассылку"}</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body"><label className="field"><span>Название рассылки</span><input required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, напоминание о вебинаре" /></label><label className="field"><span>Сообщение</span><textarea required rows={7} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Напишите текст, который получат клиенты…"/><small>{message.length} символов</small></label><fieldset><legend>Кому отправить</legend><div className="choice-grid"><label className={audienceMode === "all" ? "choice active" : "choice"}><input type="radio" name="audience" checked={audienceMode === "all"} onChange={() => setAudienceMode("all")}/><strong>Вся база</strong><small>Все активные клиенты</small></label><label className={audienceMode === "tags" ? "choice active" : "choice"}><input type="radio" name="audience" checked={audienceMode === "tags"} onChange={() => setAudienceMode("tags")}/><strong>По тегам</strong><small>Только выбранные группы</small></label></div>{audienceMode === "tags" && <div className="tag-choice"><span>Включить теги</span>{tags.map((tag) => <button type="button" className={included.includes(tag.id) ? `tag tag-${tag.color} selected` : "tag"} key={tag.id} onClick={() => toggle(included, setIncluded, tag.id)}>{tag.name}</button>)}</div>}<div className="tag-choice"><span>Исключить теги <small>(необязательно)</small></span>{tags.length ? tags.map((tag) => <button type="button" className={excluded.includes(tag.id) ? "tag excluded selected" : "tag"} key={tag.id} onClick={() => toggle(excluded, setExcluded, tag.id)}>{tag.name}</button>) : <small>Тегов пока нет</small>}</div></fieldset><fieldset><legend>Когда отправить</legend><div className="timing-row"><label><input type="radio" name="timing" checked={timing === "now"} onChange={() => setTiming("now")}/> Сразу</label><label><input type="radio" name="timing" checked={timing === "later"} onChange={() => setTiming("later")}/> По расписанию</label></div>{timing === "later" && <input className="date-input" type="datetime-local" required value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />}</fieldset>{error && <p className="form-error">{error}</p>}</div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Сохраняем…" : campaign ? (timing === "now" ? "Сохранить и отправить" : "Сохранить изменения") : (timing === "now" ? "Отправить сейчас" : "Запланировать")}</button></footer></form></div>;
 }

@@ -129,6 +129,33 @@ export async function POST(request: Request) {
         now,
       )
       .run();
+  } else if (body.action === "update-campaign") {
+    const campaignId = Number(body.campaignId);
+    const campaign = await DB.prepare("SELECT status FROM campaigns WHERE id = ?")
+      .bind(campaignId)
+      .first<{ status: string }>();
+    if (!campaign) return json({ error: "Рассылка не найдена" }, 404);
+    if (campaign.status !== "scheduled") return json({ error: "Можно редактировать только запланированную рассылку" }, 409);
+    const title = String(body.title ?? "").trim();
+    const message = String(body.message ?? "").trim();
+    if (!title || !message) return json({ error: "Заполните название и текст" }, 400);
+    const sendNow = Boolean(body.sendNow);
+    const scheduledAt = sendNow ? now : String(body.scheduledAt ?? "");
+    if (!sendNow && !scheduledAt) return json({ error: "Выберите время отправки" }, 400);
+    await DB.prepare(
+      "UPDATE campaigns SET title = ?, message = ?, audience_mode = ?, included_tag_ids = ?, excluded_tag_ids = ?, scheduled_at = ?, updated_at = ? WHERE id = ? AND status = 'scheduled'",
+    )
+      .bind(
+        title,
+        message,
+        String(body.audienceMode ?? "all"),
+        JSON.stringify(parseIds(body.includedTagIds)),
+        JSON.stringify(parseIds(body.excludedTagIds)),
+        scheduledAt,
+        now,
+        campaignId,
+      )
+      .run();
   } else if (body.action === "cancel-campaign") {
     await DB.prepare("UPDATE campaigns SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'scheduled'")
       .bind(now, Number(body.campaignId))
