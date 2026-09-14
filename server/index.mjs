@@ -50,7 +50,7 @@ const SCENARIOS = [
   { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
 const DEFAULT_SCENARIO_MESSAGES = [
-  { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: null, color: "violet", order: 10 },
+  { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: "начал_анкету", color: "violet", order: 10 },
   { key: "quiz_q2", scenario: "test", title: "Вопрос 2 из 4", message: '2/4\n<b>Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?</b>', tag: null, color: "violet", order: 20 },
   { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
   { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
@@ -61,6 +61,7 @@ const DEFAULT_SCENARIO_MESSAGES = [
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
 for (const item of DEFAULT_SCENARIO_MESSAGES) insertScenarioMessage.run(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now());
+db.prepare("UPDATE scenario_messages SET tag_name='начал_анкету',tag_color='violet',updated_at=? WHERE message_key='quiz_q1' AND tag_name IS NULL").run(now());
 
 function scenarioMessage(key) {
   const value = db.prepare("SELECT * FROM scenario_messages WHERE message_key=?").get(key);
@@ -150,14 +151,15 @@ function tagCustomer(telegramId, name, color) {
   db.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").run(name, color);
   db.prepare(`INSERT OR IGNORE INTO customer_tags (customer_id, tag_id) SELECT c.id, t.id FROM customers c, tags t WHERE c.telegram_id=? AND t.name=?`).run(telegramId, name);
 }
-async function question(chatId, step) {
+async function question(chatId, telegramId, step) {
   const item = scenarioMessage(`quiz_q${step}`);
   await send(chatId, { text: item.message, reply_markup: { inline_keyboard: [[{ text: "Да", callback_data: `quiz:${step}:yes` }, { text: "Нет", callback_data: `quiz:${step}:no` }]] } }, "quiz");
+  if (item.tag_name) tagCustomer(telegramId, item.tag_name, item.tag_color);
 }
 async function startQuiz(chatId, telegramId) {
   const timestamp = now();
   db.prepare(`INSERT INTO quiz_sessions (telegram_id, answers_json, current_step, status, result, details, started_at, completed_at, updated_at) VALUES (?, '[]', 1, 'active', NULL, NULL, ?, NULL, ?) ON CONFLICT(telegram_id) DO UPDATE SET answers_json='[]', current_step=1, status='active', result=NULL, details=NULL, started_at=excluded.started_at, completed_at=NULL, updated_at=excluded.updated_at`).run(telegramId, timestamp, timestamp);
-  await question(chatId, 1);
+  await question(chatId, telegramId, 1);
 }
 async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answer) {
   const session = db.prepare("SELECT answers_json, current_step, status FROM quiz_sessions WHERE telegram_id=?").get(telegramId);
@@ -168,7 +170,7 @@ async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answe
   record({ telegramId, direction: "inbound", text: answer ? "Да" : "Нет", scenario: "quiz_answer" });
   if (step < 4) {
     db.prepare("UPDATE quiz_sessions SET answers_json=?, current_step=?, updated_at=? WHERE telegram_id=?").run(JSON.stringify(answers), step + 1, timestamp, telegramId);
-    await question(chatId, step + 1); return;
+    await question(chatId, telegramId, step + 1); return;
   }
   const consultation = answers.some(Boolean);
   db.prepare("UPDATE quiz_sessions SET answers_json=?, status=?, result=?, completed_at=?, updated_at=? WHERE telegram_id=?").run(JSON.stringify(answers), consultation ? "awaiting_details" : "completed", consultation ? "consultation" : "eligible", timestamp, timestamp, telegramId);

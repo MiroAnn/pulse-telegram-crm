@@ -8,7 +8,7 @@ const scenarioDefinitions = [
   { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
 const defaultScenarioMessages = [
-  { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: null, color: "violet", order: 10 },
+  { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: "начал_анкету", color: "violet", order: 10 },
   { key: "quiz_q2", scenario: "test", title: "Вопрос 2 из 4", message: '2/4\n<b>Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?</b>', tag: null, color: "violet", order: 20 },
   { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
   { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
@@ -22,6 +22,9 @@ async function ensureScenarioMessages(DB: D1Database, now: string) {
   await DB.batch(defaultScenarioMessages.map((item) => DB.prepare(
     "INSERT OR IGNORE INTO scenario_messages (message_key, scenario_key, title, message, tag_name, tag_color, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   ).bind(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now)));
+  await DB.prepare("UPDATE scenario_messages SET tag_name = 'начал_анкету', tag_color = 'violet', updated_at = ? WHERE message_key = 'quiz_q1' AND tag_name IS NULL")
+    .bind(now)
+    .run();
 }
 
 async function dashboardState() {
