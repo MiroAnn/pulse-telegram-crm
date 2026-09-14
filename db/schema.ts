@@ -143,3 +143,9 @@ export const scenarioMessageTags = sqliteTable(
     index("idx_scenario_message_tags_tag").on(table.tagId, table.messageKey),
   ],
 );
+
+export const scenarioSettings = sqliteTable("scenario_settings", {
+  scenarioKey: text("scenario_key").primaryKey(),
+  isHidden: integer("is_hidden", { mode: "boolean" }).notNull().default(false),
+  updatedAt: text("updated_at").notNull(),
+});

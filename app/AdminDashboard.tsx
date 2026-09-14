@@ -66,6 +66,7 @@ type Scenario = {
   startParam: string;
   startLink: string;
   joinedCount: number;
+  isHidden: boolean;
   messages: ScenarioMessage[];
 };
 type Dashboard = {
@@ -305,23 +306,15 @@ function peopleLabel(count: number) {
 
 function Scenarios({ data, action, onNotice }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard>; onNotice: (message: string) => void }) {
   const [editing, setEditing] = useState<ScenarioMessage | null>(null);
-  const [copied, setCopied] = useState("");
-
-  async function copyLink(scenario: Scenario) {
-    try {
-      await navigator.clipboard.writeText(scenario.startLink);
-      setCopied(scenario.key);
-      window.setTimeout(() => setCopied(""), 1800);
-    } catch {
-      onNotice("Не удалось скопировать ссылку — её можно выделить вручную");
-    }
-  }
+  const [showHidden, setShowHidden] = useState(false);
+  const hiddenCount = data.scenarios.filter((scenario) => scenario.isHidden).length;
+  const scenarios = data.scenarios.filter((scenario) => showHidden || !scenario.isHidden);
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">Автоматизация бота</span><h1>Сценарии</h1><p>Стартовые ссылки, сообщения и теги, которые бот назначает клиентам.</p></div></div>
+    <div className="page-heading"><div><span className="eyebrow">Автоматизация бота</span><h1>Сценарии</h1><p>Стартовые ссылки, сообщения и теги, которые бот назначает клиентам.</p></div>{hiddenCount > 0 && <button type="button" className="secondary-button" onClick={() => setShowHidden((value) => !value)}>{showHidden ? "Скрыть скрытые" : `Показать скрытые (${hiddenCount})`}</button>}</div>
     <div className="scenario-list">
-      {data.scenarios.map((scenario) => <section className="scenario-card" key={scenario.key}>
-        <header className="scenario-header"><div><span className="scenario-mark">⌘</span><div><h2>{scenario.title}</h2><span>{scenario.messages.length} сообщений</span></div></div><div className="scenario-header-side"><div className="scenario-stat"><strong>{scenario.joinedCount}</strong><span>подключились</span></div><div className="scenario-link"><code>/start={scenario.startParam}</code><a href={scenario.startLink} target="_blank" rel="noreferrer">Открыть</a><button type="button" onClick={() => void copyLink(scenario)}>{copied === scenario.key ? "Скопировано" : "Копировать"}</button></div></div></header>
+      {scenarios.map((scenario) => <section className={`scenario-card${scenario.isHidden ? " scenario-card-hidden" : ""}`} key={scenario.key}>
+        <header className="scenario-header"><div><span className="scenario-mark">⌘</span><div><h2>{scenario.title}</h2><span>{scenario.messages.length} сообщений{scenario.isHidden ? " · скрыт в админке" : ""}</span></div></div><div className="scenario-header-side"><div className="scenario-stat"><strong>{scenario.joinedCount}</strong><span>подключились</span></div><div className="scenario-link"><code>/start={scenario.startParam}</code><div className="scenario-link-actions"><a href={scenario.startLink} target="_blank" rel="noreferrer">Открыть</a><label><input type="checkbox" checked={scenario.isHidden} onChange={async (event) => { try { await action({ action: "set-scenario-hidden", scenarioKey: scenario.key, isHidden: event.target.checked }); } catch { onNotice("Не удалось изменить видимость сценария"); } }}/><span>Скрыть</span></label></div></div></div></header>
         <div className="scenario-flow">{scenario.messages.map((item, index) => <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tags.map((tag) => { const tagCount = data.customers.filter((customer) => !customer.is_demo && customer.tags.some((customerTag) => customerTag.id === tag.id)).length; return <i className={`tag tag-${tag.color}`} key={tag.id}>＋ {tag.name} · {tagCount} {peopleLabel(tagCount)}</i>; })}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tags.length ? "Теги назначаются после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>)}</div>
       </section>)}
     </div>

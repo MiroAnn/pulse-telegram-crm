@@ -30,12 +30,15 @@ async function ensureScenarioMessages(DB: D1Database, now: string) {
       .bind(item.key, item.key, item.tag, item.tag)
       .run();
   }
+  await DB.batch(scenarioDefinitions.map((scenario) => DB.prepare(
+    "INSERT OR IGNORE INTO scenario_settings (scenario_key, is_hidden, updated_at) VALUES (?, 0, ?)",
+  ).bind(scenario.key, now)));
 }
 
 async function dashboardState() {
   const DB = await ensureDatabase();
   await ensureScenarioMessages(DB, new Date().toISOString());
-  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult, scenarioTagsResult, scenarioStartsResult] = await DB.batch([
+  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult, scenarioTagsResult, scenarioStartsResult, scenarioSettingsResult] = await DB.batch([
     DB.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC"),
     DB.prepare("SELECT * FROM tags ORDER BY name"),
     DB.prepare("SELECT customer_id, tag_id FROM customer_tags"),
@@ -45,6 +48,7 @@ async function dashboardState() {
     DB.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order"),
     DB.prepare("SELECT smt.message_key, t.id, t.name, t.color FROM scenario_message_tags smt JOIN tags t ON t.id = smt.tag_id ORDER BY t.name"),
     DB.prepare("SELECT scenario, COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start', 'webinar_signup') GROUP BY scenario"),
+    DB.prepare("SELECT scenario_key, is_hidden FROM scenario_settings"),
   ]);
 
   const tags = tagsResult.results as Array<Record<string, unknown>>;
@@ -76,8 +80,10 @@ async function dashboardState() {
       .map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })),
   }));
   const scenarioStarts = new Map((scenarioStartsResult.results as Array<Record<string, unknown>>).map((item) => [String(item.scenario), Number(item.joined_count)]));
+  const scenarioSettings = new Map((scenarioSettingsResult.results as Array<Record<string, unknown>>).map((item) => [String(item.scenario_key), Boolean(item.is_hidden)]));
   const scenarios = scenarioDefinitions.map(({ startEvent, ...item }) => ({
     ...item,
+    isHidden: scenarioSettings.get(item.key) ?? false,
     startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`,
     joinedCount: scenarioStarts.get(startEvent) ?? 0,
     messages: scenarioRows.filter((message) => message.scenario_key === item.key),
@@ -234,6 +240,12 @@ export async function POST(request: Request) {
       DB.prepare("DELETE FROM scenario_message_tags WHERE message_key = ?").bind(messageKey),
       ...[...selectedTags.keys()].map((tagId) => DB.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key, tag_id) VALUES (?, ?)").bind(messageKey, tagId)),
     ]);
+  } else if (body.action === "set-scenario-hidden") {
+    const scenarioKey = String(body.scenarioKey ?? "");
+    if (!scenarioDefinitions.some((scenario) => scenario.key === scenarioKey)) return json({ error: "Сценарий не найден" }, 404);
+    await DB.prepare("INSERT INTO scenario_settings (scenario_key, is_hidden, updated_at) VALUES (?, ?, ?) ON CONFLICT(scenario_key) DO UPDATE SET is_hidden = excluded.is_hidden, updated_at = excluded.updated_at")
+      .bind(scenarioKey, body.isHidden ? 1 : 0, now)
+      .run();
   } else if (body.action === "mark-chat-read") {
     const telegramId = String(body.telegramId ?? "");
     await DB.prepare(

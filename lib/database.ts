@@ -97,6 +97,11 @@ const statements = [
     tag_id INTEGER NOT NULL,
     UNIQUE(message_key, tag_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS scenario_settings (
+    scenario_key TEXT PRIMARY KEY,
+    is_hidden INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status)`,
   `CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id)`,

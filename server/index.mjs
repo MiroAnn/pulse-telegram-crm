@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (telegram_id TEXT PRIMARY KEY, answers_
 CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id TEXT NOT NULL, telegram_message_id INTEGER, direction TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', text TEXT NOT NULL, scenario TEXT NOT NULL DEFAULT 'freeform', is_unread INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(telegram_id, telegram_message_id, direction));
 CREATE TABLE IF NOT EXISTS scenario_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_key TEXT NOT NULL UNIQUE, scenario_key TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, tag_name TEXT, tag_color TEXT NOT NULL DEFAULT 'violet', sort_order INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scenario_message_tags (message_key TEXT NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(message_key, tag_id));
+CREATE TABLE IF NOT EXISTS scenario_settings (scenario_key TEXT PRIMARY KEY, is_hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id);
@@ -51,6 +52,7 @@ const SCENARIOS = [
   { key: "test", title: "Анкета «Здоровая спина»", startParam: "test", startEvent: "quiz_start" },
   { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
+for (const scenario of SCENARIOS) db.prepare("INSERT OR IGNORE INTO scenario_settings (scenario_key,is_hidden,updated_at) VALUES (?,0,?)").run(scenario.key, now());
 const DEFAULT_SCENARIO_MESSAGES = [
   { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: "начал_анкету", color: "violet", order: 10 },
   { key: "quiz_q2", scenario: "test", title: "Вопрос 2 из 4", message: '2/4\n<b>Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?</b>', tag: null, color: "violet", order: 20 },
@@ -250,7 +252,8 @@ function dashboard() {
   const scenarioTags = db.prepare("SELECT smt.message_key,t.id,t.name,t.color FROM scenario_message_tags smt JOIN tags t ON t.id=smt.tag_id ORDER BY t.name").all();
   const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all().map(message => ({ ...message, tags: scenarioTags.filter(tag => tag.message_key === message.message_key).map(tag => ({ id: tag.id, name: tag.name, color: tag.color })) }));
   const scenarioStarts = new Map(db.prepare("SELECT scenario,COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start','webinar_signup') GROUP BY scenario").all().map(item => [item.scenario, Number(item.joined_count)]));
-  const scenarios = SCENARIOS.map(({ startEvent, ...item }) => ({ ...item, startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`, joinedCount: scenarioStarts.get(startEvent) || 0, messages: scenarioRows.filter(message => message.scenario_key === item.key) }));
+  const scenarioSettings = new Map(db.prepare("SELECT scenario_key,is_hidden FROM scenario_settings").all().map(item => [item.scenario_key, Boolean(item.is_hidden)]));
+  const scenarios = SCENARIOS.map(({ startEvent, ...item }) => ({ ...item, isHidden: scenarioSettings.get(item.key) || false, startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`, joinedCount: scenarioStarts.get(startEvent) || 0, messages: scenarioRows.filter(message => message.scenario_key === item.key) }));
   return { customers, tags, campaigns, messages, scenarios, stats: { customers: customers.filter(c => c.status === "active" && !c.is_demo).length, reachable: customers.filter(c => c.status === "active" && !c.is_demo).length, campaigns: campaigns.length, scheduled: campaigns.filter(c => c.status === "scheduled").length, unread: messages.filter(m => m.direction === "inbound" && m.is_unread).length } };
 }
 function ids(value) { return Array.isArray(value) ? value.map(Number).filter(id => Number.isInteger(id) && id > 0) : []; }
@@ -273,6 +276,8 @@ async function action(input) {
     const validTagIds = tagIds.length ? db.prepare(`SELECT id FROM tags WHERE id IN (${tagIds.map(() => "?").join(",")})`).all(...tagIds).map(tag => Number(tag.id)) : [];
     for (const name of newTagNames) { const tag = db.prepare("SELECT id FROM tags WHERE name=?").get(name); if (tag) validTagIds.push(Number(tag.id)); }
     db.exec("BEGIN"); try { db.prepare("UPDATE scenario_messages SET message=?,tag_name=NULL,updated_at=? WHERE message_key=?").run(message, timestamp, messageKey); db.prepare("DELETE FROM scenario_message_tags WHERE message_key=?").run(messageKey); for (const tagId of new Set(validTagIds)) db.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key,tag_id) VALUES (?,?)").run(messageKey, tagId); db.exec("COMMIT"); } catch (error) { db.exec("ROLLBACK"); throw error; }
+  } else if (input.action === "set-scenario-hidden") {
+    const scenarioKey = String(input.scenarioKey || ""); if (!SCENARIOS.some(item => item.key === scenarioKey)) throw new Error("Сценарий не найден"); db.prepare("INSERT INTO scenario_settings (scenario_key,is_hidden,updated_at) VALUES (?,?,?) ON CONFLICT(scenario_key) DO UPDATE SET is_hidden=excluded.is_hidden,updated_at=excluded.updated_at").run(scenarioKey, input.isHidden ? 1 : 0, timestamp);
   } else if (input.action === "mark-chat-read") {
     db.prepare("UPDATE chat_messages SET is_unread=0 WHERE telegram_id=? AND direction='inbound'").run(String(input.telegramId || ""));
   } else if (input.action === "send-chat-message") {
