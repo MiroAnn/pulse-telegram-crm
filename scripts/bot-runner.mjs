@@ -1,6 +1,7 @@
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const appUrl = (process.env.LOCAL_APP_URL || "http://localhost:3001").replace(/\/$/, "");
 const adminKey = process.env.LOCAL_ADMIN_KEY || "";
+const siteAuthToken = process.env.SITES_AUTH_TOKEN || "";
 
 if (!token) {
   console.error("Не найден TELEGRAM_BOT_TOKEN. Скопируйте .env.example в .dev.vars и добавьте токен.");
@@ -24,7 +25,10 @@ async function api(method, payload = {}) {
 async function forward(update) {
   const response = await fetch(`${appUrl}/api/telegram/update`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(siteAuthToken ? { "OAI-Sites-Authorization": `Bearer ${siteAuthToken}` } : {}),
+    },
     body: JSON.stringify(update),
   });
   if (!response.ok) throw new Error(`Админка вернула ${response.status}`);
@@ -34,7 +38,10 @@ async function tick() {
   try {
     const response = await fetch(`${appUrl}/api/worker/tick`, {
       method: "POST",
-      headers: adminKey ? { "x-admin-key": adminKey } : {},
+      headers: {
+        ...(adminKey ? { "x-admin-key": adminKey } : {}),
+        ...(siteAuthToken ? { "OAI-Sites-Authorization": `Bearer ${siteAuthToken}` } : {}),
+      },
     });
     const result = await response.json();
     if (result.processed) console.log(`Рассылка обработана: отправлено ${result.sent}, ошибок ${result.failed}`);

@@ -1,15 +1,16 @@
-import { ensureDatabase, json, parseIds } from "../../../lib/database";
+import { ensureDatabase, getEnv, json, parseIds } from "../../../lib/database";
 
 type ActionBody = Record<string, unknown> & { action?: string };
 
 async function dashboardState() {
   const DB = await ensureDatabase();
-  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult] = await DB.batch([
+  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult] = await DB.batch([
     DB.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC"),
     DB.prepare("SELECT * FROM tags ORDER BY name"),
     DB.prepare("SELECT customer_id, tag_id FROM customer_tags"),
     DB.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50"),
     DB.prepare("SELECT * FROM quiz_sessions"),
+    DB.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC"),
   ]);
 
   const tags = tagsResult.results as Array<Record<string, unknown>>;
@@ -38,12 +39,16 @@ async function dashboardState() {
     customers,
     tags,
     campaigns: campaignsResult.results,
+    messages: messagesResult.results,
     stats: {
       customers: customers.filter((item) => item.status === "active" && !item.is_demo).length,
       reachable: customers.filter((item) => item.status === "active" && !item.is_demo).length,
       campaigns: campaignsResult.results.length,
       scheduled: (campaignsResult.results as Array<Record<string, unknown>>).filter(
         (item) => item.status === "scheduled",
+      ).length,
+      unread: (messagesResult.results as Array<Record<string, unknown>>).filter(
+        (item) => item.direction === "inbound" && Boolean(item.is_unread),
       ).length,
     },
   };
@@ -128,6 +133,40 @@ export async function POST(request: Request) {
     await DB.prepare("UPDATE campaigns SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'scheduled'")
       .bind(now, Number(body.campaignId))
       .run();
+  } else if (body.action === "mark-chat-read") {
+    const telegramId = String(body.telegramId ?? "");
+    await DB.prepare(
+      "UPDATE chat_messages SET is_unread = 0 WHERE telegram_id = ? AND direction = 'inbound'",
+    ).bind(telegramId).run();
+  } else if (body.action === "send-chat-message") {
+    const telegramId = String(body.telegramId ?? "");
+    const message = String(body.message ?? "").trim();
+    if (!telegramId || !message) return json({ error: "Введите сообщение" }, 400);
+    const customer = await DB.prepare(
+      "SELECT id FROM customers WHERE telegram_id = ? AND is_demo = 0",
+    ).bind(telegramId).first<{ id: number }>();
+    if (!customer) return json({ error: "Клиент не найден" }, 404);
+    const token = getEnv().TELEGRAM_BOT_TOKEN;
+    if (!token) return json({ error: "Бот ещё не подключён" }, 503);
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: telegramId, text: message }),
+    });
+    const result = await response.json() as {
+      ok: boolean;
+      description?: string;
+      result?: { message_id?: number };
+    };
+    if (!result.ok) return json({ error: result.description ?? "Telegram не отправил сообщение" }, 502);
+    await DB.prepare(
+      `INSERT INTO chat_messages
+       (telegram_id, telegram_message_id, direction, kind, text, scenario, is_unread, created_at)
+       VALUES (?, ?, 'outbound', 'text', ?, 'admin_reply', 0, ?)`,
+    ).bind(telegramId, result.result?.message_id ?? null, message, now).run();
+    await DB.prepare(
+      "UPDATE chat_messages SET is_unread = 0 WHERE telegram_id = ? AND direction = 'inbound'",
+    ).bind(telegramId).run();
   } else {
     return json({ error: "Неизвестное действие" }, 400);
   }

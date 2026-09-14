@@ -69,10 +69,24 @@ const statements = [
     completed_at TEXT,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id TEXT NOT NULL,
+    telegram_message_id INTEGER,
+    direction TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'text',
+    text TEXT NOT NULL,
+    scenario TEXT NOT NULL DEFAULT 'freeform',
+    is_unread INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE(telegram_id, telegram_message_id, direction)
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status)`,
   `CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id)`,
   `CREATE INDEX IF NOT EXISTS idx_quiz_sessions_status ON quiz_sessions(status, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_created ON chat_messages(telegram_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(is_unread, created_at)`,
 ];
 
 let initialized = false;

@@ -7,6 +7,12 @@ type TelegramMessage = {
   from?: TelegramUser;
   contact?: { phone_number: string; user_id?: number };
   text?: string;
+  caption?: string;
+  photo?: unknown[];
+  document?: unknown;
+  voice?: unknown;
+  video?: unknown;
+  sticker?: unknown;
 };
 type TelegramUpdate = {
   message?: TelegramMessage;
@@ -37,8 +43,48 @@ async function telegram(method: string, payload: Record<string, unknown>) {
   return response.json();
 }
 
-async function send(chatId: number, payload: Record<string, unknown>) {
-  return telegram("sendMessage", { chat_id: chatId, parse_mode: "HTML", ...payload });
+async function recordChatMessage(input: {
+  telegramId: string;
+  telegramMessageId?: number | null;
+  direction: "inbound" | "outbound";
+  kind?: string;
+  text: string;
+  scenario: string;
+  unread?: boolean;
+}) {
+  const DB = await ensureDatabase();
+  await DB.prepare(
+    `INSERT OR IGNORE INTO chat_messages
+     (telegram_id, telegram_message_id, direction, kind, text, scenario, is_unread, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    input.telegramId,
+    input.telegramMessageId ?? null,
+    input.direction,
+    input.kind ?? "text",
+    input.text,
+    input.scenario,
+    input.unread ? 1 : 0,
+    new Date().toISOString(),
+  ).run();
+}
+
+async function send(chatId: number, payload: Record<string, unknown>, scenario = "bot") {
+  const result = await telegram("sendMessage", { chat_id: chatId, parse_mode: "HTML", ...payload }) as {
+    ok?: boolean;
+    result?: { message_id?: number };
+  } | null;
+  const text = typeof payload.text === "string" ? payload.text : "";
+  if (text && result?.ok) {
+    await recordChatMessage({
+      telegramId: String(chatId),
+      telegramMessageId: result.result?.message_id ?? null,
+      direction: "outbound",
+      text: text.replace(/<[^>]*>/g, ""),
+      scenario,
+    });
+  }
+  return result;
 }
 
 async function sendQuestion(chatId: number, step: number, withIntro = false) {
@@ -53,7 +99,7 @@ async function sendQuestion(chatId: number, step: number, withIntro = false) {
         { text: "Нет", callback_data: `quiz:${step}:no` },
       ]],
     },
-  });
+  }, "quiz");
 }
 
 async function getAvatarPath(userId: number) {
@@ -147,6 +193,12 @@ async function handleQuizAnswer(
   const answers = JSON.parse(session.answers_json) as boolean[];
   answers.push(answer);
   const now = new Date().toISOString();
+  await recordChatMessage({
+    telegramId,
+    direction: "inbound",
+    text: answer ? "Да" : "Нет",
+    scenario: "quiz_answer",
+  });
 
   if (step < QUESTIONS.length) {
     await DB.prepare(
@@ -168,13 +220,13 @@ async function handleQuizAnswer(
     await tagCustomer(telegramId, "Нужна консультация", "amber");
     await send(chatId, {
       text: '<b>Участие в курсе стоит обсудить с Дарьей</b>\n\nВы ответили «Да» минимум на один из вопросов, но, если хотите пойти на курс, пожалуйста, напишите сюда в бота подробности вашей ситуации и помощница Анна вместе с Дарьей обсудит ваше участие в курсе.',
-    });
+    }, "quiz_result");
   } else {
     await tagCustomer(telegramId, "Тест пройден", "mint");
     await send(chatId, {
       text: '<b>Вы можете идти на курс «Здоровая спина».</b>\n\nВыберите подходящий тариф и заберите памятку по регулярности упражнений.',
       reply_markup: { inline_keyboard: [[{ text: "Посмотреть тарифы", url: TARIFFS_URL }]] },
-    });
+    }, "quiz_result");
   }
 }
 
@@ -200,10 +252,12 @@ export async function POST(request: Request) {
     return json({ ok: true });
   }
 
-  const text = message?.text?.trim() ?? "";
+  const text = message?.text?.trim() ?? message?.caption?.trim() ?? "";
   if (/^\/start(?:\s+|=)test$/i.test(text)) {
+    await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "quiz_start" });
     await startQuiz(chatId, telegramId);
   } else if (text === "/start") {
+    await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "start" });
     await send(chatId, {
       text: `Здравствуйте, ${user.first_name}! Нажмите кнопку ниже, чтобы поделиться номером телефона.`,
       reply_markup: {
@@ -211,31 +265,47 @@ export async function POST(request: Request) {
         resize_keyboard: true,
         one_time_keyboard: true,
       },
-    });
+    }, "start");
   } else if (message?.contact) {
+    await recordChatMessage({ telegramId, telegramMessageId: message.message_id, direction: "inbound", kind: "contact", text: `Контакт: ${message.contact.phone_number}`, scenario: "contact" });
     await send(chatId, {
       text: "Спасибо! Контакт сохранён. Теперь отправьте email одним сообщением или нажмите «Пропустить».",
       reply_markup: { keyboard: [[{ text: "Пропустить" }]], resize_keyboard: true, one_time_keyboard: true },
-    });
+    }, "contact");
   } else {
     const DB = await ensureDatabase();
     const quiz = await DB.prepare(
       "SELECT status FROM quiz_sessions WHERE telegram_id = ?",
     ).bind(telegramId).first<{ status: string }>();
     if (text && quiz?.status === "awaiting_details") {
+      await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "quiz_details", unread: true });
       const now = new Date().toISOString();
       await DB.prepare(
         "UPDATE quiz_sessions SET details = ?, status = 'details_received', updated_at = ? WHERE telegram_id = ?",
       ).bind(text, now, telegramId).run();
       await send(chatId, {
         text: "Спасибо! Мы сохранили подробности. Анна вместе с Дарьей обсудит вашу ситуацию и вернётся с ответом здесь, в боте.",
-      });
+      }, "quiz_details");
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+      await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "email" });
       await DB.prepare("UPDATE customers SET email = ?, updated_at = ? WHERE telegram_id = ?")
         .bind(text.toLowerCase(), new Date().toISOString(), telegramId).run();
-      await send(chatId, { text: "Готово — данные сохранены.", reply_markup: { remove_keyboard: true } });
+      await send(chatId, { text: "Готово — данные сохранены.", reply_markup: { remove_keyboard: true } }, "email");
     } else if (text === "Пропустить") {
-      await send(chatId, { text: "Хорошо, можно добавить email позже.", reply_markup: { remove_keyboard: true } });
+      await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "skip" });
+      await send(chatId, { text: "Хорошо, можно добавить email позже.", reply_markup: { remove_keyboard: true } }, "skip");
+    } else if (message) {
+      const kind = message.photo ? "photo" : message.document ? "document" : message.voice ? "voice" : message.video ? "video" : message.sticker ? "sticker" : "text";
+      const fallback: Record<string, string> = { photo: "Фото", document: "Документ", voice: "Голосовое сообщение", video: "Видео", sticker: "Стикер", text: "Неподдерживаемое сообщение" };
+      await recordChatMessage({
+        telegramId,
+        telegramMessageId: message.message_id,
+        direction: "inbound",
+        kind,
+        text: text || fallback[kind],
+        scenario: "freeform",
+        unread: true,
+      });
     }
   }
 

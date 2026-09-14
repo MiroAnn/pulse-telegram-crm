@@ -88,3 +88,27 @@ export const quizSessions = sqliteTable(
   },
   (table) => [index("idx_quiz_sessions_status").on(table.status, table.updatedAt)],
 );
+
+export const chatMessages = sqliteTable(
+  "chat_messages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    telegramId: text("telegram_id").notNull(),
+    telegramMessageId: integer("telegram_message_id"),
+    direction: text("direction").notNull(),
+    kind: text("kind").notNull().default("text"),
+    text: text("text").notNull(),
+    scenario: text("scenario").notNull().default("freeform"),
+    isUnread: integer("is_unread", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_messages_telegram_message").on(
+      table.telegramId,
+      table.telegramMessageId,
+      table.direction,
+    ),
+    index("idx_chat_messages_chat_created").on(table.telegramId, table.createdAt),
+    index("idx_chat_messages_unread").on(table.isUnread, table.createdAt),
+  ],
+);

@@ -36,18 +36,31 @@ type Campaign = {
   failed_count: number;
   created_at: string;
 };
+type ChatMessage = {
+  id: number;
+  telegram_id: string;
+  telegram_message_id: number | null;
+  direction: "inbound" | "outbound";
+  kind: string;
+  text: string;
+  scenario: string;
+  is_unread: number;
+  created_at: string;
+};
 type Dashboard = {
   customers: Customer[];
   tags: Tag[];
   campaigns: Campaign[];
-  stats: { customers: number; reachable: number; campaigns: number; scheduled: number };
+  messages: ChatMessage[];
+  stats: { customers: number; reachable: number; campaigns: number; scheduled: number; unread: number };
 };
 
 const emptyDashboard: Dashboard = {
   customers: [],
   tags: [],
   campaigns: [],
-  stats: { customers: 0, reachable: 0, campaigns: 0, scheduled: 0 },
+  messages: [],
+  stats: { customers: 0, reachable: 0, campaigns: 0, scheduled: 0, unread: 0 },
 };
 
 const statusLabels: Record<string, string> = {
@@ -84,26 +97,31 @@ function niceDate(value: string | null) {
 export function AdminDashboard() {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"customers" | "segments" | "campaigns">("customers");
+  const [view, setView] = useState<"customers" | "chats" | "segments" | "campaigns">("customers");
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<number | "all">("all");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [composer, setComposer] = useState(false);
+  const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let active = true;
-    fetch("/api/dashboard", { cache: "no-store" })
-      .then((response) => {
+    async function refresh() {
+      try {
+        const response = await fetch("/api/dashboard", { cache: "no-store" });
         if (!response.ok) throw new Error("Не удалось загрузить данные");
-        return response.json() as Promise<Dashboard>;
-      })
-      .then((result) => { if (active) setData(result); })
-      .catch((error: unknown) => {
+        const result = await response.json() as Dashboard;
+        if (active) setData(result);
+      } catch (error) {
         if (active) setNotice(error instanceof Error ? error.message : "Ошибка загрузки");
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 8000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
 
   async function action(payload: Record<string, unknown>) {
@@ -143,6 +161,9 @@ export function AdminDashboard() {
           <button className={view === "customers" ? "nav-item active" : "nav-item"} onClick={() => setView("customers")}>
             <span className="nav-icon">◎</span> Клиенты <b>{data.stats.customers}</b>
           </button>
+          <button className={view === "chats" ? "nav-item active" : "nav-item"} onClick={() => setView("chats")}>
+            <span className="nav-icon">◌</span> Чаты <b>{data.stats.unread || ""}</b>
+          </button>
           <button className={view === "segments" ? "nav-item active" : "nav-item"} onClick={() => setView("segments")}>
             <span className="nav-icon">◇</span> Сегменты
           </button>
@@ -160,7 +181,7 @@ export function AdminDashboard() {
       <section className="workspace">
         <header className="topbar">
           <div className="mobile-brand"><span className="brand-mark">P</span> Pulse</div>
-          <label className="global-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск по клиентам" /></label>
+          <label className="global-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "chats" ? "Поиск по чатам" : "Поиск по клиентам"} /></label>
           <button className="primary-button" onClick={() => setComposer(true)}><span>＋</span> Создать рассылку</button>
         </header>
 
@@ -206,6 +227,7 @@ export function AdminDashboard() {
 
           {view === "segments" && <Segments data={data} action={action} />}
           {view === "campaigns" && <Campaigns data={data} onCompose={() => setComposer(true)} action={action} />}
+          {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); setNotice("Сообщение отправлено"); }} />}
         </div>
       </section>
 
@@ -213,6 +235,63 @@ export function AdminDashboard() {
       {composer && <Composer tags={data.tags} onClose={() => setComposer(false)} onCreate={async (payload) => { await action({ action: "create-campaign", ...payload }); setComposer(false); setView("campaigns"); setNotice("Рассылка добавлена в очередь"); }} />}
     </main>
   );
+}
+
+function Chats({ data, query, selectedChat, onSelect, onSend }: {
+  data: Dashboard;
+  query: string;
+  selectedChat: string | null;
+  onSelect: (telegramId: string) => Promise<void>;
+  onSend: (telegramId: string, message: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const conversations = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return data.customers
+      .map((customer) => {
+        const messages = data.messages.filter((message) => message.telegram_id === customer.telegram_id);
+        const last = messages[messages.length - 1];
+        const unread = messages.filter((message) => message.direction === "inbound" && Boolean(message.is_unread)).length;
+        return { customer, messages, last, unread };
+      })
+      .filter((chat) => chat.last && (!needle || [chat.customer.first_name, chat.customer.last_name, chat.customer.username, chat.last.text].filter(Boolean).join(" ").toLowerCase().includes(needle)))
+      .sort((a, b) => new Date(b.last.created_at).getTime() - new Date(a.last.created_at).getTime());
+  }, [data.customers, data.messages, query]);
+  const activeId = selectedChat ?? conversations[0]?.customer.telegram_id ?? null;
+  const active = conversations.find((chat) => chat.customer.telegram_id === activeId) ?? null;
+
+  useEffect(() => {
+    if (!selectedChat && conversations[0]) void onSelect(conversations[0].customer.telegram_id);
+  }, [conversations, onSelect, selectedChat]);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!active || !draft.trim()) return;
+    setBusy(true); setError("");
+    try { await onSend(active.customer.telegram_id, draft.trim()); setDraft(""); }
+    catch (err) { setError(err instanceof Error ? err.message : "Не удалось отправить"); }
+    finally { setBusy(false); }
+  }
+
+  return <>
+    <div className="page-heading"><div><span className="eyebrow">Входящие сообщения</span><h1>Чаты</h1><p>Здесь появляются вопросы и сообщения, которые требуют вашего ответа.</p></div></div>
+    {conversations.length === 0 ? <div className="empty-state tall"><span className="empty-mark">◌</span><h3>Новых диалогов пока нет</h3><p>Когда клиент напишет боту вне сценария, сообщение появится здесь.</p></div> : <div className="chat-layout">
+      <aside className="chat-list" aria-label="Список чатов">
+        {conversations.map((chat) => <button key={chat.customer.telegram_id} className={activeId === chat.customer.telegram_id ? "chat-list-item active" : "chat-list-item"} onClick={() => void onSelect(chat.customer.telegram_id)}>
+          <Avatar customer={chat.customer}/><span className="chat-list-copy"><strong>{chat.customer.first_name} {chat.customer.last_name}</strong><small>{chat.last.text}</small></span><span className="chat-list-meta"><time>{niceDate(chat.last.created_at)}</time>{chat.unread > 0 && <b>{chat.unread}</b>}</span>
+        </button>)}
+      </aside>
+      {active && <section className="chat-window">
+        <header><Avatar customer={active.customer}/><div><strong>{active.customer.first_name} {active.customer.last_name}</strong><small>@{active.customer.username ?? "без_username"}</small></div></header>
+        <div className="message-stream">
+          {active.messages.map((message) => <div key={message.id} className={message.direction === "outbound" ? "message-row outbound" : "message-row inbound"}><div className="message-bubble"><p>{message.text}</p><small>{message.kind !== "text" ? `${message.kind} · ` : ""}{niceDate(message.created_at)}</small></div></div>)}
+        </div>
+        <form className="chat-reply" onSubmit={submit}><textarea aria-label="Ответ клиенту" rows={2} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Напишите ответ…"/><button className="primary-button" disabled={busy || !draft.trim()}>{busy ? "Отправляем…" : "Отправить"}</button>{error && <p className="form-error">{error}</p>}</form>
+      </section>}
+    </div>}
+  </>;
 }
 
 function Segments({ data, action }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
