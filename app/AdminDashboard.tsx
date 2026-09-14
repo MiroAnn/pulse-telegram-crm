@@ -279,7 +279,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           )}
 
           {view === "segments" && <Segments data={data} action={action} />}
-          {view === "scenarios" && <Scenarios data={data} action={action} onNotice={setNotice} />}
+          {view === "scenarios" && <Scenarios data={data} action={action} />}
           {view === "campaigns" && <Campaigns data={data} onCompose={() => { setEditingCampaign(null); setComposer(true); }} onEdit={(campaign) => { setEditingCampaign(campaign); setComposer(true); }} action={action} />}
           {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); }} />}
         </div>
@@ -304,19 +304,17 @@ function peopleLabel(count: number) {
   return "человек";
 }
 
-function Scenarios({ data, action, onNotice }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard>; onNotice: (message: string) => void }) {
+function Scenarios({ data, action }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
   const [editing, setEditing] = useState<ScenarioMessage | null>(null);
-  const [showHidden, setShowHidden] = useState(false);
-  const hiddenCount = data.scenarios.filter((scenario) => scenario.isHidden).length;
-  const scenarios = data.scenarios.filter((scenario) => showHidden || !scenario.isHidden);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">Автоматизация бота</span><h1>Сценарии</h1><p>Стартовые ссылки, сообщения и теги, которые бот назначает клиентам.</p></div>{hiddenCount > 0 && <button type="button" className="secondary-button" onClick={() => setShowHidden((value) => !value)}>{showHidden ? "Скрыть скрытые" : `Показать скрытые (${hiddenCount})`}</button>}</div>
+    <div className="page-heading"><div><span className="eyebrow">Автоматизация бота</span><h1>Сценарии</h1><p>Стартовые ссылки, сообщения и теги, которые бот назначает клиентам.</p></div></div>
     <div className="scenario-list">
-      {scenarios.map((scenario) => <section className={`scenario-card${scenario.isHidden ? " scenario-card-hidden" : ""}`} key={scenario.key}>
-        <header className="scenario-header"><div><span className="scenario-mark">⌘</span><div><h2>{scenario.title}</h2><span>{scenario.messages.length} сообщений{scenario.isHidden ? " · скрыт в админке" : ""}</span></div></div><div className="scenario-header-side"><div className="scenario-stat"><strong>{scenario.joinedCount}</strong><span>подключились</span></div><div className="scenario-link"><code>/start={scenario.startParam}</code><div className="scenario-link-actions"><a href={scenario.startLink} target="_blank" rel="noreferrer">Открыть</a><label><input type="checkbox" checked={scenario.isHidden} onChange={async (event) => { try { await action({ action: "set-scenario-hidden", scenarioKey: scenario.key, isHidden: event.target.checked }); } catch { onNotice("Не удалось изменить видимость сценария"); } }}/><span>Скрыть</span></label></div></div></div></header>
-        <div className="scenario-flow">{scenario.messages.map((item, index) => <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tags.map((tag) => { const tagCount = data.customers.filter((customer) => !customer.is_demo && customer.tags.some((customerTag) => customerTag.id === tag.id)).length; return <i className={`tag tag-${tag.color}`} key={tag.id}>＋ {tag.name} · {tagCount} {peopleLabel(tagCount)}</i>; })}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tags.length ? "Теги назначаются после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>)}</div>
-      </section>)}
+      {data.scenarios.map((scenario) => { const isCollapsed = collapsed.has(scenario.key); return <section className="scenario-card" key={scenario.key}>
+        <header className="scenario-header"><div><span className="scenario-mark">⌘</span><div><h2>{scenario.title}</h2><span>{scenario.messages.length} сообщений</span></div></div><div className="scenario-header-side"><button type="button" className={`scenario-collapse${isCollapsed ? " collapsed" : ""}`} aria-expanded={!isCollapsed} aria-label={isCollapsed ? "Развернуть сценарий" : "Свернуть сценарий"} onClick={() => setCollapsed((current) => { const next = new Set(current); if (next.has(scenario.key)) next.delete(scenario.key); else next.add(scenario.key); return next; })}>⌃</button><div className="scenario-stat"><strong>{scenario.joinedCount}</strong><span>подключились</span></div><div className="scenario-link"><code>/start={scenario.startParam}</code><a href={scenario.startLink} target="_blank" rel="noreferrer">Открыть</a></div></div></header>
+        {!isCollapsed && <div className="scenario-flow">{scenario.messages.map((item, index) => <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tags.map((tag) => { const tagCount = data.customers.filter((customer) => !customer.is_demo && customer.tags.some((customerTag) => customerTag.id === tag.id)).length; return <i className={`tag tag-${tag.color}`} key={tag.id}>＋ {tag.name} · {tagCount} {peopleLabel(tagCount)}</i>; })}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tags.length ? "Теги назначаются после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>)}</div>}
+      </section>; })}
     </div>
     {editing && <ScenarioMessageEditor message={editing} allTags={data.tags} onClose={() => setEditing(null)} onSave={async (message, tagIds, newTagNames) => { await action({ action: "update-scenario-message", messageKey: editing.message_key, message, tagIds, newTagNames }); setEditing(null); }} />}
   </>;
