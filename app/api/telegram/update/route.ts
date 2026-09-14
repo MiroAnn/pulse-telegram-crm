@@ -24,7 +24,7 @@ type TelegramUpdate = {
   };
 };
 
-const TARIFFS_URL = "https://course.dariakavunenko.ru/tarifs/";
+const TARIFFS_URL = "https://course.dariakavunenko.ru/tarifs/?utm_source=telegram";
 const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
 const WEBINAR_MESSAGE = `Здравствуйте!
 
