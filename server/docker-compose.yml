@@ -8,18 +8,11 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
-    ports:
-      - "127.0.0.1:4100:4100"
-    networks:
-      - default
-      - rehabilitation
+    network_mode: host
+    extra_hosts:
+      - "api.telegram.org=2001:67c:4e8:f004::9"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 30s
       timeout: 5s
       retries: 3
-
-networks:
-  rehabilitation:
-    external: true
-    name: rehabilitation-platform_default
