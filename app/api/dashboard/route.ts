@@ -4,17 +4,21 @@ type ActionBody = Record<string, unknown> & { action?: string };
 
 async function dashboardState() {
   const DB = await ensureDatabase();
-  const [customersResult, tagsResult, linksResult, campaignsResult] = await DB.batch([
+  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult] = await DB.batch([
     DB.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC"),
     DB.prepare("SELECT * FROM tags ORDER BY name"),
     DB.prepare("SELECT customer_id, tag_id FROM customer_tags"),
     DB.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50"),
+    DB.prepare("SELECT * FROM quiz_sessions"),
   ]);
 
   const tags = tagsResult.results as Array<Record<string, unknown>>;
   const links = linksResult.results as Array<{ customer_id: number; tag_id: number }>;
   const tagsById = new Map(tags.map((tag) => [Number(tag.id), tag]));
   const customerTags = new Map<number, Array<Record<string, unknown>>>();
+  const quizzes = new Map(
+    (quizzesResult.results as Array<Record<string, unknown>>).map((quiz) => [String(quiz.telegram_id), quiz]),
+  );
   for (const link of links) {
     const values = customerTags.get(link.customer_id) ?? [];
     const tag = tagsById.get(link.tag_id);
@@ -26,6 +30,7 @@ async function dashboardState() {
     (customer) => ({
       ...customer,
       tags: customerTags.get(Number(customer.id)) ?? [],
+      quiz: quizzes.get(String(customer.telegram_id)) ?? null,
     }),
   );
 

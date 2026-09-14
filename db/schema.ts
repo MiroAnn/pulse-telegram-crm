@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const customers = sqliteTable(
   "customers",
@@ -71,4 +71,20 @@ export const deliveries = sqliteTable(
       table.customerId,
     ),
   ],
+);
+
+export const quizSessions = sqliteTable(
+  "quiz_sessions",
+  {
+    telegramId: text("telegram_id").primaryKey(),
+    answersJson: text("answers_json").notNull().default("[]"),
+    currentStep: integer("current_step").notNull().default(1),
+    status: text("status").notNull().default("active"),
+    result: text("result"),
+    details: text("details"),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [index("idx_quiz_sessions_status").on(table.status, table.updatedAt)],
 );

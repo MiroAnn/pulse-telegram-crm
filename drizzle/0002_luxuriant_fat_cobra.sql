@@ -1,0 +1,1 @@
+CREATE INDEX `idx_quiz_sessions_status` ON `quiz_sessions` (`status`,`updated_at`);

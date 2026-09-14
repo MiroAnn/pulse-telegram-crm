@@ -17,6 +17,13 @@ type Customer = {
   is_demo: number;
   created_at: string;
   tags: Tag[];
+  quiz: {
+    status: string;
+    result: "eligible" | "consultation" | null;
+    details: string | null;
+    answers_json: string;
+    completed_at: string | null;
+  } | null;
 };
 type Campaign = {
   id: number;
@@ -229,7 +236,7 @@ function Campaigns({ data, onCompose, action }: { data: Dashboard; onCompose: ()
 
 function CustomerPanel({ customer, tags, onClose, onSave }: { customer: Customer; tags: Tag[]; onClose: () => void; onSave: (tagIds: number[]) => Promise<void> }) {
   const [selectedTags, setSelectedTags] = useState(customer.tags.map((tag) => tag.id));
-  return <div className="overlay"><aside className="detail-panel"><button className="close-button" onClick={onClose} aria-label="Закрыть">×</button><Avatar customer={customer} large/><h2>{customer.first_name} {customer.last_name}</h2><a href={`https://t.me/${customer.username}`} target="_blank" rel="noreferrer">@{customer.username ?? "без_username"}</a><div className="detail-grid"><div><small>Телефон</small><strong>{customer.phone ?? "Не указан"}</strong></div><div><small>Email</small><strong>{customer.email ?? "Не указан"}</strong></div><div><small>Telegram ID</small><strong>{customer.telegram_id}</strong></div><div><small>В базе с</small><strong>{niceDate(customer.created_at)}</strong></div></div><div className="tag-editor"><h3>Теги клиента</h3>{tags.length === 0 ? <p>Сначала создайте тег в разделе «Сегменты».</p> : tags.map((tag) => <label key={tag.id}><input type="checkbox" checked={selectedTags.includes(tag.id)} onChange={() => setSelectedTags((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}/><span className={`tag tag-${tag.color}`}>{tag.name}</span></label>)}</div><button className="primary-button full" onClick={() => void onSave(selectedTags)}>Сохранить изменения</button></aside></div>;
+  return <div className="overlay"><aside className="detail-panel"><button className="close-button" onClick={onClose} aria-label="Закрыть">×</button><Avatar customer={customer} large/><h2>{customer.first_name} {customer.last_name}</h2><a href={`https://t.me/${customer.username}`} target="_blank" rel="noreferrer">@{customer.username ?? "без_username"}</a><div className="detail-grid"><div><small>Телефон</small><strong>{customer.phone ?? "Не указан"}</strong></div><div><small>Email</small><strong>{customer.email ?? "Не указан"}</strong></div><div><small>Telegram ID</small><strong>{customer.telegram_id}</strong></div><div><small>В базе с</small><strong>{niceDate(customer.created_at)}</strong></div></div>{customer.quiz && <div className={`quiz-result quiz-result-${customer.quiz.result ?? "active"}`}><small>Анкета «Здоровая спина»</small><strong>{customer.quiz.result === "eligible" ? "Курс подходит" : customer.quiz.result === "consultation" ? "Нужна консультация" : "Анкета не завершена"}</strong>{customer.quiz.details && <p><b>Комментарий клиента:</b><br/>{customer.quiz.details}</p>}</div>}<div className="tag-editor"><h3>Теги клиента</h3>{tags.length === 0 ? <p>Сначала создайте тег в разделе «Сегменты».</p> : tags.map((tag) => <label key={tag.id}><input type="checkbox" checked={selectedTags.includes(tag.id)} onChange={() => setSelectedTags((current) => current.includes(tag.id) ? current.filter((id) => id !== tag.id) : [...current, tag.id])}/><span className={`tag tag-${tag.color}`}>{tag.name}</span></label>)}</div><button className="primary-button full" onClick={() => void onSave(selectedTags)}>Сохранить изменения</button></aside></div>;
 }
 
 function Composer({ tags, onClose, onCreate }: { tags: Tag[]; onClose: () => void; onCreate: (payload: Record<string, unknown>) => Promise<void> }) {
