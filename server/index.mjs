@@ -38,6 +38,16 @@ const QUESTIONS = [
   "Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?",
 ];
 const TARIFFS_URL = "https://miroann.github.io/zdorovaya-osanka-darya/tarifs";
+const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
+const WEBINAR_MESSAGE = `Здравствуйте!
+
+Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
+
+<a href="${POSTURE_GUIDE_URL}">Методичка</a>
+
+Ссылку на вебинар пришлю за сутки до начала.
+
+До встречи.`;
 
 const sql = {
   record: db.prepare(`INSERT OR IGNORE INTO chat_messages (telegram_id, telegram_message_id, direction, kind, text, scenario, is_unread, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -163,6 +173,10 @@ async function handleUpdate(update) {
   const text = message?.text?.trim() || message?.caption?.trim() || "";
   if (/^\/start(?:\s+|=)test$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "quiz_start" }); await startQuiz(chatId, telegramId);
+  } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
+    record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "webinar_signup" });
+    tagCustomer(telegramId, "Вебинар_спина", "violet");
+    await send(chatId, { text: WEBINAR_MESSAGE, link_preview_options: { is_disabled: true } }, "webinar_signup");
   } else if (text === "/start") {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "start" });
     await send(chatId, { text: `Здравствуйте, ${user.first_name}! Нажмите кнопку ниже, чтобы поделиться номером телефона.`, reply_markup: { keyboard: [[{ text: "Поделиться телефоном", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } }, "start");

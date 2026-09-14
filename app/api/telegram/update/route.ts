@@ -25,6 +25,16 @@ type TelegramUpdate = {
 };
 
 const TARIFFS_URL = "https://miroann.github.io/zdorovaya-osanka-darya/tarifs";
+const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
+const WEBINAR_MESSAGE = `Здравствуйте!
+
+Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
+
+<a href="${POSTURE_GUIDE_URL}">Методичка</a>
+
+Ссылку на вебинар пришлю за сутки до начала.
+
+До встречи.`;
 const QUESTIONS = [
   "Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?",
   "Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?",
@@ -256,6 +266,13 @@ export async function POST(request: Request) {
   if (/^\/start(?:\s+|=)test$/i.test(text)) {
     await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "quiz_start" });
     await startQuiz(chatId, telegramId);
+  } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
+    await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "webinar_signup" });
+    await tagCustomer(telegramId, "Вебинар_спина", "violet");
+    await send(chatId, {
+      text: WEBINAR_MESSAGE,
+      link_preview_options: { is_disabled: true },
+    }, "webinar_signup");
   } else if (text === "/start") {
     await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "start" });
     await send(chatId, {
