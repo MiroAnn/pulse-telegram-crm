@@ -46,8 +46,8 @@ const WEBINAR_MESSAGE = `Здравствуйте!
 До встречи.`;
 
 const SCENARIOS = [
-  { key: "test", title: "Анкета «Здоровая спина»", startParam: "test" },
-  { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina" },
+  { key: "test", title: "Анкета «Здоровая спина»", startParam: "test", startEvent: "quiz_start" },
+  { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
 const DEFAULT_SCENARIO_MESSAGES = [
   { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: null, color: "violet", order: 10 },
@@ -237,7 +237,8 @@ function dashboard() {
   const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50").all();
   const messages = db.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC").all();
   const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all();
-  const scenarios = SCENARIOS.map(item => ({ ...item, startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`, messages: scenarioRows.filter(message => message.scenario_key === item.key) }));
+  const scenarioStarts = new Map(db.prepare("SELECT scenario,COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start','webinar_signup') GROUP BY scenario").all().map(item => [item.scenario, Number(item.joined_count)]));
+  const scenarios = SCENARIOS.map(({ startEvent, ...item }) => ({ ...item, startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`, joinedCount: scenarioStarts.get(startEvent) || 0, messages: scenarioRows.filter(message => message.scenario_key === item.key) }));
   return { customers, tags, campaigns, messages, scenarios, stats: { customers: customers.filter(c => c.status === "active" && !c.is_demo).length, reachable: customers.filter(c => c.status === "active" && !c.is_demo).length, campaigns: campaigns.length, scheduled: campaigns.filter(c => c.status === "scheduled").length, unread: messages.filter(m => m.direction === "inbound" && m.is_unread).length } };
 }
 function ids(value) { return Array.isArray(value) ? value.map(Number).filter(id => Number.isInteger(id) && id > 0) : []; }

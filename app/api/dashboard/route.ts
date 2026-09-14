@@ -4,8 +4,8 @@ type ActionBody = Record<string, unknown> & { action?: string };
 
 const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
 const scenarioDefinitions = [
-  { key: "test", title: "Анкета «Здоровая спина»", startParam: "test" },
-  { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina" },
+  { key: "test", title: "Анкета «Здоровая спина»", startParam: "test", startEvent: "quiz_start" },
+  { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
 const defaultScenarioMessages = [
   { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: null, color: "violet", order: 10 },
@@ -27,7 +27,7 @@ async function ensureScenarioMessages(DB: D1Database, now: string) {
 async function dashboardState() {
   const DB = await ensureDatabase();
   await ensureScenarioMessages(DB, new Date().toISOString());
-  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult] = await DB.batch([
+  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult, scenarioStartsResult] = await DB.batch([
     DB.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC"),
     DB.prepare("SELECT * FROM tags ORDER BY name"),
     DB.prepare("SELECT customer_id, tag_id FROM customer_tags"),
@@ -35,6 +35,7 @@ async function dashboardState() {
     DB.prepare("SELECT * FROM quiz_sessions"),
     DB.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC"),
     DB.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order"),
+    DB.prepare("SELECT scenario, COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start', 'webinar_signup') GROUP BY scenario"),
   ]);
 
   const tags = tagsResult.results as Array<Record<string, unknown>>;
@@ -59,9 +60,11 @@ async function dashboardState() {
     }),
   );
   const scenarioRows = scenarioMessagesResult.results as Array<Record<string, unknown>>;
-  const scenarios = scenarioDefinitions.map((item) => ({
+  const scenarioStarts = new Map((scenarioStartsResult.results as Array<Record<string, unknown>>).map((item) => [String(item.scenario), Number(item.joined_count)]));
+  const scenarios = scenarioDefinitions.map(({ startEvent, ...item }) => ({
     ...item,
     startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`,
+    joinedCount: scenarioStarts.get(startEvent) ?? 0,
     messages: scenarioRows.filter((message) => message.scenario_key === item.key),
   }));
 
