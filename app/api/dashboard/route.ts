@@ -98,11 +98,6 @@ export async function POST(request: Request) {
   if (body.action === "seed-demo") {
     const count = await DB.prepare("SELECT COUNT(*) AS total FROM customers WHERE is_demo = 1").first<{ total: number }>();
     if (!count?.total) {
-      await DB.batch([
-        DB.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").bind("Новый клиент", "mint"),
-        DB.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").bind("Курс осанки", "violet"),
-        DB.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").bind("VIP", "amber"),
-      ]);
       const demo = [
         ["demo-1001", "anna_fit", "Анна", "Волкова", "+7 999 123-45-67", "anna@example.com"],
         ["demo-1002", "maria_move", "Мария", "Соколова", "+7 916 555-18-20", "maria@example.com"],
@@ -113,12 +108,6 @@ export async function POST(request: Request) {
           "INSERT OR IGNORE INTO customers (telegram_id, username, first_name, last_name, phone, email, is_demo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
         ).bind(...row, now, now).run();
       }
-      await DB.prepare(
-        "INSERT OR IGNORE INTO customer_tags (customer_id, tag_id) SELECT c.id, t.id FROM customers c, tags t WHERE c.telegram_id = 'demo-1001' AND t.name IN ('Новый клиент', 'Курс осанки')",
-      ).run();
-      await DB.prepare(
-        "INSERT OR IGNORE INTO customer_tags (customer_id, tag_id) SELECT c.id, t.id FROM customers c, tags t WHERE c.telegram_id = 'demo-1002' AND t.name = 'VIP'",
-      ).run();
     }
   } else if (body.action === "clear-demo") {
     await DB.prepare("DELETE FROM customer_tags WHERE customer_id IN (SELECT id FROM customers WHERE is_demo = 1)").run();
