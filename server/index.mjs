@@ -60,11 +60,12 @@ const DEFAULT_SCENARIO_MESSAGES = [
   { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
   { key: "quiz_consultation", scenario: "test", title: "Результат: нужна консультация", message: '<b>Участие в курсе стоит обсудить с Дарьей</b>\n\nВы ответили «Да» минимум на один из вопросов, но, если хотите пойти на курс, пожалуйста, напишите сюда в бота подробности вашей ситуации и помощница Анна вместе с Дарьей обсудит ваше участие в курсе.', tag: "Нужна консультация", color: "amber", order: 50 },
   { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '<b>Вы можете идти на курс «Здоровая спина».</b>\n\nВыберите подходящий тариф и заберите памятку по регулярности упражнений.', tag: "Тест пройден", color: "mint", order: 60 },
-  { key: "quiz_details_received", scenario: "test", title: "Подробности получены", message: "Спасибо! Мы сохранили подробности. Анна вместе с Дарьей обсудит вашу ситуацию и вернётся с ответом здесь, в боте.", tag: null, color: "violet", order: 70 },
   { key: "webinar_confirmation", scenario: "vebinarspina", title: "Подтверждение регистрации", message: WEBINAR_MESSAGE, tag: "Вебинар_спина", color: "violet", order: 10 },
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
 for (const item of DEFAULT_SCENARIO_MESSAGES) insertScenarioMessage.run(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now());
+db.prepare("DELETE FROM scenario_message_tags WHERE message_key='quiz_details_received'").run();
+db.prepare("DELETE FROM scenario_messages WHERE message_key='quiz_details_received'").run();
 for (const item of DEFAULT_SCENARIO_MESSAGES.filter(item => item.tag)) {
   db.prepare("INSERT OR IGNORE INTO tags (name,color) VALUES (?,?)").run(item.tag, item.color);
   db.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key,tag_id) SELECT ?,t.id FROM tags t JOIN scenario_messages sm ON sm.message_key=? WHERE t.name=? AND sm.tag_name=?").run(item.key, item.key, item.tag, item.tag);
@@ -224,7 +225,6 @@ async function handleUpdate(update) {
     if (text && quiz?.status === "awaiting_details") {
       record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "quiz_details", unread: true });
       db.prepare("UPDATE quiz_sessions SET details=?, status='details_received', updated_at=? WHERE telegram_id=?").run(text, now(), telegramId);
-      await send(chatId, { text: scenarioMessage("quiz_details_received").message }, "quiz_details");
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
       record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "email" });
       db.prepare("UPDATE customers SET email=?, updated_at=? WHERE telegram_id=?").run(text.toLowerCase(), now(), telegramId);

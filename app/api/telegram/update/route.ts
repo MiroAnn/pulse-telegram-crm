@@ -300,9 +300,6 @@ export async function POST(request: Request) {
       await DB.prepare(
         "UPDATE quiz_sessions SET details = ?, status = 'details_received', updated_at = ? WHERE telegram_id = ?",
       ).bind(text, now, telegramId).run();
-      await send(chatId, {
-        text: "Спасибо! Мы сохранили подробности. Анна вместе с Дарьей обсудит вашу ситуацию и вернётся с ответом здесь, в боте.",
-      }, "quiz_details");
     } else if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
       await recordChatMessage({ telegramId, telegramMessageId: message?.message_id, direction: "inbound", text, scenario: "email" });
       await DB.prepare("UPDATE customers SET email = ?, updated_at = ? WHERE telegram_id = ?")
