@@ -293,6 +293,15 @@ function scenarioPreview(message: string) {
   return message.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
 }
 
+function peopleLabel(count: number) {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "человек";
+  if (mod10 === 1) return "человек";
+  if (mod10 >= 2 && mod10 <= 4) return "человека";
+  return "человек";
+}
+
 function Scenarios({ data, action, onNotice }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard>; onNotice: (message: string) => void }) {
   const [editing, setEditing] = useState<ScenarioMessage | null>(null);
   const [copied, setCopied] = useState("");
@@ -312,7 +321,10 @@ function Scenarios({ data, action, onNotice }: { data: Dashboard; action: (paylo
     <div className="scenario-list">
       {data.scenarios.map((scenario) => <section className="scenario-card" key={scenario.key}>
         <header className="scenario-header"><div><span className="scenario-mark">⌘</span><div><h2>{scenario.title}</h2><span>{scenario.messages.length} сообщений</span></div></div><div className="scenario-header-side"><div className="scenario-stat"><strong>{scenario.joinedCount}</strong><span>подключились</span></div><div className="scenario-link"><code>/start={scenario.startParam}</code><a href={scenario.startLink} target="_blank" rel="noreferrer">Открыть</a><button type="button" onClick={() => void copyLink(scenario)}>{copied === scenario.key ? "Скопировано" : "Копировать"}</button></div></div></header>
-        <div className="scenario-flow">{scenario.messages.map((item, index) => <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tag_name && <i className={`tag tag-${item.tag_color}`}>＋ {item.tag_name}</i>}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tag_name ? "Тег назначается после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>)}</div>
+        <div className="scenario-flow">{scenario.messages.map((item, index) => {
+          const tagCount = item.tag_name ? data.customers.filter((customer) => !customer.is_demo && customer.tags.some((tag) => tag.name === item.tag_name)).length : 0;
+          return <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tag_name && <i className={`tag tag-${item.tag_color}`}>＋ {item.tag_name} · {tagCount} {peopleLabel(tagCount)}</i>}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tag_name ? "Тег назначается после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>;
+        })}</div>
       </section>)}
     </div>
     {editing && <ScenarioMessageEditor message={editing} onClose={() => setEditing(null)} onSave={async (message) => { await action({ action: "update-scenario-message", messageKey: editing.message_key, message }); setEditing(null); }} />}
