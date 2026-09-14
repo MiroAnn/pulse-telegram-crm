@@ -81,10 +81,20 @@ function signAvatar(path) { return createHmac("sha256", adminPassword).update(pa
 function publicAvatar(path) { return path && publicApiUrl ? `${publicApiUrl}/api/avatar?path=${encodeURIComponent(path)}&sig=${signAvatar(path)}` : path; }
 
 async function telegram(method, payload = {}) {
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.description || `Telegram ${response.status}`);
-  return result.result;
+  const retryableCodes = new Set(["UND_ERR_CONNECT_TIMEOUT", "ETIMEDOUT", "ENETUNREACH", "EAI_AGAIN"]);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.description || `Telegram ${response.status}`);
+      return result.result;
+    } catch (error) {
+      const code = error?.cause?.code;
+      if (!retryableCodes.has(code) || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  throw new Error("Telegram unavailable");
 }
 function record({ telegramId, telegramMessageId = null, direction, kind = "text", text, scenario, unread = false }) {
   sql.record.run(String(telegramId), telegramMessageId, direction, kind, text, scenario, unread ? 1 : 0, now());
