@@ -1,0 +1,25 @@
+services:
+  pulse:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    container_name: pulse-telegram-crm
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "127.0.0.1:4100:4100"
+    networks:
+      - default
+      - rehabilitation
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  rehabilitation:
+    external: true
+    name: rehabilitation-platform_default

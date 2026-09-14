@@ -1,0 +1,6 @@
+{
+  "name": "pulse-telegram-server",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" }
+}

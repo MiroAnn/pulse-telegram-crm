@@ -1,0 +1,4 @@
+pulse.201-24-53-219.sslip.io {
+  encode zstd gzip
+  reverse_proxy pulse-telegram-crm:4100
+}

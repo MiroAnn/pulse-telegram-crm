@@ -1,7 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import Image from "next/image";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type Tag = { id: number; name: string; color: string };
 type Customer = {
@@ -79,7 +78,10 @@ function Avatar({ customer, large = false }: { customer: Customer; large?: boole
   const className = large ? `profile-avatar avatar-${customer.id % 4}` : `avatar avatar-${customer.id % 4}`;
   if (customer.avatar_url) {
     const size = large ? 72 : 37;
-    return <span className={className}><Image src={`/api/telegram/avatar?path=${encodeURIComponent(customer.avatar_url)}`} alt="" width={size} height={size} unoptimized /></span>;
+    const src = customer.avatar_url.startsWith("http") ? customer.avatar_url : `/api/telegram/avatar?path=${encodeURIComponent(customer.avatar_url)}`;
+    // The same component is also bundled as a static GitHub Pages app, where next/image is unavailable.
+    // eslint-disable-next-line @next/next/no-img-element
+    return <span className={className}><img src={src} alt="" width={size} height={size} /></span>;
   }
   return <span className={className}>{initials(customer)}</span>;
 }
@@ -94,7 +96,7 @@ function niceDate(value: string | null) {
   }).format(new Date(value));
 }
 
-export function AdminDashboard() {
+export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized }: { apiBase?: string; authPassword?: string; onUnauthorized?: () => void } = {}) {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"customers" | "chats" | "segments" | "campaigns">("customers");
@@ -104,12 +106,15 @@ export function AdminDashboard() {
   const [composer, setComposer] = useState(false);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const apiUrl = useCallback((path: string) => `${apiBase.replace(/\/$/, "")}${path}`, [apiBase]);
+  const authHeaders = useMemo<Record<string, string>>(() => authPassword ? { Authorization: `Basic ${btoa(`admin:${authPassword}`)}` } : {}, [authPassword]);
 
   useEffect(() => {
     let active = true;
     async function refresh() {
       try {
-        const response = await fetch("/api/dashboard", { cache: "no-store" });
+        const response = await fetch(apiUrl("/api/dashboard"), { cache: "no-store", headers: authHeaders });
+        if (response.status === 401) { onUnauthorized?.(); throw new Error("Неверный пароль"); }
         if (!response.ok) throw new Error("Не удалось загрузить данные");
         const result = await response.json() as Dashboard;
         if (active) setData(result);
@@ -122,14 +127,15 @@ export function AdminDashboard() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 8000);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [apiUrl, authHeaders, onUnauthorized]);
 
   async function action(payload: Record<string, unknown>) {
-    const response = await fetch("/api/dashboard", {
+    const response = await fetch(apiUrl("/api/dashboard"), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify(payload),
     });
+    if (response.status === 401) onUnauthorized?.();
     const result = (await response.json()) as Dashboard & { error?: string };
     if (!response.ok) throw new Error(result.error ?? "Не удалось сохранить");
     setData(result);
