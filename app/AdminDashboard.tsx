@@ -48,11 +48,30 @@ type ChatMessage = {
   is_unread: number;
   created_at: string;
 };
+type ScenarioMessage = {
+  id: number;
+  message_key: string;
+  scenario_key: string;
+  title: string;
+  message: string;
+  tag_name: string | null;
+  tag_color: string;
+  sort_order: number;
+  updated_at: string;
+};
+type Scenario = {
+  key: string;
+  title: string;
+  startParam: string;
+  startLink: string;
+  messages: ScenarioMessage[];
+};
 type Dashboard = {
   customers: Customer[];
   tags: Tag[];
   campaigns: Campaign[];
   messages: ChatMessage[];
+  scenarios: Scenario[];
   stats: { customers: number; reachable: number; campaigns: number; scheduled: number; unread: number };
 };
 
@@ -61,6 +80,7 @@ const emptyDashboard: Dashboard = {
   tags: [],
   campaigns: [],
   messages: [],
+  scenarios: [],
   stats: { customers: 0, reachable: 0, campaigns: 0, scheduled: 0, unread: 0 },
 };
 
@@ -119,7 +139,7 @@ function datetimeLocal(value: string | null) {
 export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized }: { apiBase?: string; authPassword?: string; onUnauthorized?: () => void } = {}) {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"customers" | "chats" | "segments" | "campaigns">("customers");
+  const [view, setView] = useState<"customers" | "chats" | "segments" | "scenarios" | "campaigns">("customers");
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<number | "all">("all");
   const [selected, setSelected] = useState<Customer | null>(null);
@@ -194,6 +214,9 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           <button className={view === "segments" ? "nav-item active" : "nav-item"} onClick={() => setView("segments")}>
             <span className="nav-icon">◇</span> Сегменты
           </button>
+          <button className={view === "scenarios" ? "nav-item active" : "nav-item"} onClick={() => setView("scenarios")}>
+            <span className="nav-icon">⌘</span> Сценарии
+          </button>
           <button className={view === "campaigns" ? "nav-item active" : "nav-item"} onClick={() => setView("campaigns")}>
             <span className="nav-icon">↗</span> Рассылки <b>{data.stats.scheduled || ""}</b>
           </button>
@@ -253,6 +276,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           )}
 
           {view === "segments" && <Segments data={data} action={action} />}
+          {view === "scenarios" && <Scenarios data={data} action={action} onNotice={setNotice} />}
           {view === "campaigns" && <Campaigns data={data} onCompose={() => { setEditingCampaign(null); setComposer(true); }} onEdit={(campaign) => { setEditingCampaign(campaign); setComposer(true); }} action={action} />}
           {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); setNotice("Сообщение отправлено"); }} />}
         </div>
@@ -262,6 +286,44 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
       {composer && <Composer key={editingCampaign?.id ?? "new"} tags={data.tags} campaign={editingCampaign} onClose={() => { setComposer(false); setEditingCampaign(null); }} onSave={async (payload) => { await action({ action: editingCampaign ? "update-campaign" : "create-campaign", campaignId: editingCampaign?.id, ...payload }); setComposer(false); setEditingCampaign(null); setView("campaigns"); setNotice(editingCampaign ? "Рассылка обновлена" : "Рассылка добавлена в очередь"); }} />}
     </main>
   );
+}
+
+function scenarioPreview(message: string) {
+  return message.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+}
+
+function Scenarios({ data, action, onNotice }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard>; onNotice: (message: string) => void }) {
+  const [editing, setEditing] = useState<ScenarioMessage | null>(null);
+  const [copied, setCopied] = useState("");
+
+  async function copyLink(scenario: Scenario) {
+    try {
+      await navigator.clipboard.writeText(scenario.startLink);
+      setCopied(scenario.key);
+      window.setTimeout(() => setCopied(""), 1800);
+    } catch {
+      onNotice("Не удалось скопировать ссылку — её можно выделить вручную");
+    }
+  }
+
+  return <>
+    <div className="page-heading"><div><span className="eyebrow">Автоматизация бота</span><h1>Сценарии</h1><p>Стартовые ссылки, сообщения и теги, которые бот назначает клиентам.</p></div></div>
+    <div className="scenario-list">
+      {data.scenarios.map((scenario) => <section className="scenario-card" key={scenario.key}>
+        <header className="scenario-header"><div><span className="scenario-mark">⌘</span><div><h2>{scenario.title}</h2><span>{scenario.messages.length} сообщений</span></div></div><div className="scenario-link"><code>/start={scenario.startParam}</code><a href={scenario.startLink} target="_blank" rel="noreferrer">Открыть</a><button type="button" onClick={() => void copyLink(scenario)}>{copied === scenario.key ? "Скопировано" : "Копировать"}</button></div></header>
+        <div className="scenario-flow">{scenario.messages.map((item, index) => <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tag_name && <i className={`tag tag-${item.tag_color}`}>＋ {item.tag_name}</i>}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tag_name ? "Тег назначается после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>)}</div>
+      </section>)}
+    </div>
+    {editing && <ScenarioMessageEditor message={editing} onClose={() => setEditing(null)} onSave={async (message) => { await action({ action: "update-scenario-message", messageKey: editing.message_key, message }); setEditing(null); onNotice("Текст сообщения обновлён"); }} />}
+  </>;
+}
+
+function ScenarioMessageEditor({ message, onClose, onSave }: { message: ScenarioMessage; onClose: () => void; onSave: (message: string) => Promise<void> }) {
+  const [text, setText] = useState(message.message);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await onSave(text); } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить текст"); setBusy(false); } }
+  return <div className="overlay composer-overlay"><form className="composer scenario-editor" onSubmit={submit}><header><div><span className="eyebrow">Сообщение сценария</span><h2>{message.title}</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body"><label className="field"><span>Текст сообщения</span><textarea required rows={12} maxLength={4096} value={text} onChange={(event) => setText(event.target.value)}/><small>{text.length} / 4096</small></label>{message.tag_name && <div className="scenario-tag-note"><span>После сообщения назначается тег</span><i className={`tag tag-${message.tag_color}`}>{message.tag_name}</i></div>}<p className="editor-hint">Можно использовать форматирование Telegram: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt; и &lt;a href=&quot;ссылка&quot;&gt;текст ссылки&lt;/a&gt;. Кнопки сценария сохранятся автоматически.</p>{error && <p className="form-error">{error}</p>}</div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy || !text.trim()}>{busy ? "Сохраняем…" : "Сохранить текст"}</button></footer></form></div>;
 }
 
 function Chats({ data, query, selectedChat, onSelect, onSend }: {

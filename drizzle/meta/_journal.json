@@ -29,6 +29,13 @@
       "when": 1789372868328,
       "tag": "0003_faithful_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789389129581,
+      "tag": "0004_chilly_bromley",
+      "breakpoints": true
     }
   ]
 }

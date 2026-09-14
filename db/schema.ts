@@ -112,3 +112,22 @@ export const chatMessages = sqliteTable(
     index("idx_chat_messages_unread").on(table.isUnread, table.createdAt),
   ],
 );
+
+export const scenarioMessages = sqliteTable(
+  "scenario_messages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    messageKey: text("message_key").notNull(),
+    scenarioKey: text("scenario_key").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    tagName: text("tag_name"),
+    tagColor: text("tag_color").notNull().default("violet"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_scenario_messages_key").on(table.messageKey),
+    index("idx_scenario_messages_scenario_order").on(table.scenarioKey, table.sortOrder),
+  ],
+);

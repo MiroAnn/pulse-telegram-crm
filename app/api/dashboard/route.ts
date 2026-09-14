@@ -2,15 +2,39 @@ import { ensureDatabase, getEnv, json, parseIds } from "../../../lib/database";
 
 type ActionBody = Record<string, unknown> & { action?: string };
 
+const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
+const scenarioDefinitions = [
+  { key: "test", title: "Анкета «Здоровая спина»", startParam: "test" },
+  { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina" },
+];
+const defaultScenarioMessages = [
+  { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: null, color: "violet", order: 10 },
+  { key: "quiz_q2", scenario: "test", title: "Вопрос 2 из 4", message: '2/4\n<b>Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?</b>', tag: null, color: "violet", order: 20 },
+  { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
+  { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
+  { key: "quiz_consultation", scenario: "test", title: "Результат: нужна консультация", message: '<b>Участие в курсе стоит обсудить с Дарьей</b>\n\nВы ответили «Да» минимум на один из вопросов, но, если хотите пойти на курс, пожалуйста, напишите сюда в бота подробности вашей ситуации и помощница Анна вместе с Дарьей обсудит ваше участие в курсе.', tag: "Нужна консультация", color: "amber", order: 50 },
+  { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '<b>Вы можете идти на курс «Здоровая спина».</b>\n\nВыберите подходящий тариф и заберите памятку по регулярности упражнений.', tag: "Тест пройден", color: "mint", order: 60 },
+  { key: "quiz_details_received", scenario: "test", title: "Подробности получены", message: "Спасибо! Мы сохранили подробности. Анна вместе с Дарьей обсудит вашу ситуацию и вернётся с ответом здесь, в боте.", tag: null, color: "violet", order: 70 },
+  { key: "webinar_confirmation", scenario: "vebinarspina", title: "Подтверждение регистрации", message: `Здравствуйте!\n\nЯ зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.\n\n<a href="${POSTURE_GUIDE_URL}">Методичка</a>\n\nСсылку на вебинар пришлю за сутки до начала.\n\nДо встречи.`, tag: "Вебинар_спина", color: "violet", order: 10 },
+];
+
+async function ensureScenarioMessages(DB: D1Database, now: string) {
+  await DB.batch(defaultScenarioMessages.map((item) => DB.prepare(
+    "INSERT OR IGNORE INTO scenario_messages (message_key, scenario_key, title, message, tag_name, tag_color, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).bind(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now)));
+}
+
 async function dashboardState() {
   const DB = await ensureDatabase();
-  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult] = await DB.batch([
+  await ensureScenarioMessages(DB, new Date().toISOString());
+  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult] = await DB.batch([
     DB.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC"),
     DB.prepare("SELECT * FROM tags ORDER BY name"),
     DB.prepare("SELECT customer_id, tag_id FROM customer_tags"),
     DB.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50"),
     DB.prepare("SELECT * FROM quiz_sessions"),
     DB.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC"),
+    DB.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order"),
   ]);
 
   const tags = tagsResult.results as Array<Record<string, unknown>>;
@@ -34,12 +58,19 @@ async function dashboardState() {
       quiz: quizzes.get(String(customer.telegram_id)) ?? null,
     }),
   );
+  const scenarioRows = scenarioMessagesResult.results as Array<Record<string, unknown>>;
+  const scenarios = scenarioDefinitions.map((item) => ({
+    ...item,
+    startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`,
+    messages: scenarioRows.filter((message) => message.scenario_key === item.key),
+  }));
 
   return {
     customers,
     tags,
     campaigns: campaignsResult.results,
     messages: messagesResult.results,
+    scenarios,
     stats: {
       customers: customers.filter((item) => item.status === "active" && !item.is_demo).length,
       reachable: customers.filter((item) => item.status === "active" && !item.is_demo).length,
@@ -62,6 +93,7 @@ export async function POST(request: Request) {
   const DB = await ensureDatabase();
   const body = (await request.json()) as ActionBody;
   const now = new Date().toISOString();
+  await ensureScenarioMessages(DB, now);
 
   if (body.action === "seed-demo") {
     const count = await DB.prepare("SELECT COUNT(*) AS total FROM customers WHERE is_demo = 1").first<{ total: number }>();
@@ -159,6 +191,18 @@ export async function POST(request: Request) {
   } else if (body.action === "cancel-campaign") {
     await DB.prepare("UPDATE campaigns SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'scheduled'")
       .bind(now, Number(body.campaignId))
+      .run();
+  } else if (body.action === "update-scenario-message") {
+    const messageKey = String(body.messageKey ?? "");
+    const message = String(body.message ?? "").trim();
+    if (!messageKey || !message) return json({ error: "Введите текст сообщения" }, 400);
+    if (message.length > 4096) return json({ error: "Сообщение Telegram не может быть длиннее 4096 символов" }, 400);
+    const existing = await DB.prepare("SELECT id FROM scenario_messages WHERE message_key = ?")
+      .bind(messageKey)
+      .first<{ id: number }>();
+    if (!existing) return json({ error: "Сообщение сценария не найдено" }, 404);
+    await DB.prepare("UPDATE scenario_messages SET message = ?, updated_at = ? WHERE message_key = ?")
+      .bind(message, now, messageKey)
       .run();
   } else if (body.action === "mark-chat-read") {
     const telegramId = String(body.telegramId ?? "");
