@@ -59,8 +59,8 @@ async function poll() {
     try {
       const updates = await api("getUpdates", { offset, timeout: 25, allowed_updates: ["message", "callback_query"] });
       for (const update of updates) {
-        offset = update.update_id + 1;
         await forward(update);
+        offset = update.update_id + 1;
       }
       if (Date.now() - lastTick > 10000) {
         await tick();
