@@ -279,12 +279,12 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           {view === "segments" && <Segments data={data} action={action} />}
           {view === "scenarios" && <Scenarios data={data} action={action} onNotice={setNotice} />}
           {view === "campaigns" && <Campaigns data={data} onCompose={() => { setEditingCampaign(null); setComposer(true); }} onEdit={(campaign) => { setEditingCampaign(campaign); setComposer(true); }} action={action} />}
-          {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); setNotice("Сообщение отправлено"); }} />}
+          {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); }} />}
         </div>
       </section>
 
-      {selected && <CustomerPanel customer={selected} tags={data.tags} onClose={() => setSelected(null)} onSave={async (tagIds) => { await action({ action: "set-customer-tags", customerId: selected.id, tagIds }); setNotice("Теги клиента обновлены"); }} />}
-      {composer && <Composer key={editingCampaign?.id ?? "new"} tags={data.tags} campaign={editingCampaign} onClose={() => { setComposer(false); setEditingCampaign(null); }} onSave={async (payload) => { await action({ action: editingCampaign ? "update-campaign" : "create-campaign", campaignId: editingCampaign?.id, ...payload }); setComposer(false); setEditingCampaign(null); setView("campaigns"); setNotice(editingCampaign ? "Рассылка обновлена" : "Рассылка добавлена в очередь"); }} />}
+      {selected && <CustomerPanel customer={selected} tags={data.tags} onClose={() => setSelected(null)} onSave={async (tagIds) => { await action({ action: "set-customer-tags", customerId: selected.id, tagIds }); }} />}
+      {composer && <Composer key={editingCampaign?.id ?? "new"} tags={data.tags} campaign={editingCampaign} onClose={() => { setComposer(false); setEditingCampaign(null); }} onSave={async (payload) => { await action({ action: editingCampaign ? "update-campaign" : "create-campaign", campaignId: editingCampaign?.id, ...payload }); setComposer(false); setEditingCampaign(null); setView("campaigns"); }} />}
     </main>
   );
 }
@@ -315,7 +315,7 @@ function Scenarios({ data, action, onNotice }: { data: Dashboard; action: (paylo
         <div className="scenario-flow">{scenario.messages.map((item, index) => <article className="scenario-message" key={item.message_key}><span className="scenario-step">{index + 1}</span><div className="scenario-message-body"><div className="scenario-message-title"><strong>{item.title}</strong>{item.tag_name && <i className={`tag tag-${item.tag_color}`}>＋ {item.tag_name}</i>}</div><p>{scenarioPreview(item.message)}</p><small>{item.message_key.startsWith("quiz_q") ? "Кнопки «Да» и «Нет» добавляются автоматически" : item.message_key === "quiz_eligible" ? "Кнопка перехода к тарифам добавляется автоматически" : item.tag_name ? "Тег назначается после отправки этого сообщения" : "Сообщение отправляется автоматически"}</small></div><button className="edit-button" onClick={() => setEditing(item)}>Редактировать</button></article>)}</div>
       </section>)}
     </div>
-    {editing && <ScenarioMessageEditor message={editing} onClose={() => setEditing(null)} onSave={async (message) => { await action({ action: "update-scenario-message", messageKey: editing.message_key, message }); setEditing(null); onNotice("Текст сообщения обновлён"); }} />}
+    {editing && <ScenarioMessageEditor message={editing} onClose={() => setEditing(null)} onSave={async (message) => { await action({ action: "update-scenario-message", messageKey: editing.message_key, message }); setEditing(null); }} />}
   </>;
 }
 
