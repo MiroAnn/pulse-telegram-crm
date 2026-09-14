@@ -22,15 +22,20 @@ async function ensureScenarioMessages(DB: D1Database, now: string) {
   await DB.batch(defaultScenarioMessages.map((item) => DB.prepare(
     "INSERT OR IGNORE INTO scenario_messages (message_key, scenario_key, title, message, tag_name, tag_color, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   ).bind(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now)));
-  await DB.prepare("UPDATE scenario_messages SET tag_name = 'начал_анкету', tag_color = 'violet', updated_at = ? WHERE message_key = 'quiz_q1' AND tag_name IS NULL")
-    .bind(now)
-    .run();
+  for (const item of defaultScenarioMessages.filter((message) => message.tag)) {
+    await DB.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)")
+      .bind(item.tag, item.color)
+      .run();
+    await DB.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key, tag_id) SELECT ?, t.id FROM tags t JOIN scenario_messages sm ON sm.message_key = ? WHERE t.name = ? AND sm.tag_name = ?")
+      .bind(item.key, item.key, item.tag, item.tag)
+      .run();
+  }
 }
 
 async function dashboardState() {
   const DB = await ensureDatabase();
   await ensureScenarioMessages(DB, new Date().toISOString());
-  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult, scenarioStartsResult] = await DB.batch([
+  const [customersResult, tagsResult, linksResult, campaignsResult, quizzesResult, messagesResult, scenarioMessagesResult, scenarioTagsResult, scenarioStartsResult] = await DB.batch([
     DB.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC"),
     DB.prepare("SELECT * FROM tags ORDER BY name"),
     DB.prepare("SELECT customer_id, tag_id FROM customer_tags"),
@@ -38,6 +43,7 @@ async function dashboardState() {
     DB.prepare("SELECT * FROM quiz_sessions"),
     DB.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC"),
     DB.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order"),
+    DB.prepare("SELECT smt.message_key, t.id, t.name, t.color FROM scenario_message_tags smt JOIN tags t ON t.id = smt.tag_id ORDER BY t.name"),
     DB.prepare("SELECT scenario, COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start', 'webinar_signup') GROUP BY scenario"),
   ]);
 
@@ -62,7 +68,13 @@ async function dashboardState() {
       quiz: quizzes.get(String(customer.telegram_id)) ?? null,
     }),
   );
-  const scenarioRows = scenarioMessagesResult.results as Array<Record<string, unknown>>;
+  const scenarioTagRows = scenarioTagsResult.results as Array<Record<string, unknown>>;
+  const scenarioRows = (scenarioMessagesResult.results as Array<Record<string, unknown>>).map((message) => ({
+    ...message,
+    tags: scenarioTagRows
+      .filter((tag) => tag.message_key === message.message_key)
+      .map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })),
+  }));
   const scenarioStarts = new Map((scenarioStartsResult.results as Array<Record<string, unknown>>).map((item) => [String(item.scenario), Number(item.joined_count)]));
   const scenarios = scenarioDefinitions.map(({ startEvent, ...item }) => ({
     ...item,
@@ -196,9 +208,32 @@ export async function POST(request: Request) {
       .bind(messageKey)
       .first<{ id: number }>();
     if (!existing) return json({ error: "Сообщение сценария не найдено" }, 404);
-    await DB.prepare("UPDATE scenario_messages SET message = ?, updated_at = ? WHERE message_key = ?")
-      .bind(message, now, messageKey)
-      .run();
+    const tagIds = parseIds(body.tagIds);
+    const newTagNames = [...new Set(
+      (Array.isArray(body.newTagNames) ? body.newTagNames : [])
+        .map((value) => String(value).trim())
+        .filter(Boolean),
+    )];
+    if (newTagNames.some((name) => name.length > 60)) return json({ error: "Название тега не может быть длиннее 60 символов" }, 400);
+    if (tagIds.length + newTagNames.length > 20) return json({ error: "К одному сообщению можно добавить не более 20 тегов" }, 400);
+    for (const name of newTagNames) {
+      await DB.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, 'violet')").bind(name).run();
+    }
+    const selectedTags = new Map<number, number>();
+    if (tagIds.length) {
+      const placeholders = tagIds.map(() => "?").join(", ");
+      const result = await DB.prepare(`SELECT id FROM tags WHERE id IN (${placeholders})`).bind(...tagIds).all<{ id: number }>();
+      for (const tag of result.results) selectedTags.set(Number(tag.id), Number(tag.id));
+    }
+    for (const name of newTagNames) {
+      const tag = await DB.prepare("SELECT id FROM tags WHERE name = ?").bind(name).first<{ id: number }>();
+      if (tag) selectedTags.set(Number(tag.id), Number(tag.id));
+    }
+    await DB.batch([
+      DB.prepare("UPDATE scenario_messages SET message = ?, tag_name = NULL, updated_at = ? WHERE message_key = ?").bind(message, now, messageKey),
+      DB.prepare("DELETE FROM scenario_message_tags WHERE message_key = ?").bind(messageKey),
+      ...[...selectedTags.keys()].map((tagId) => DB.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key, tag_id) VALUES (?, ?)").bind(messageKey, tagId)),
+    ]);
   } else if (body.action === "mark-chat-read") {
     const telegramId = String(body.telegramId ?? "");
     await DB.prepare(

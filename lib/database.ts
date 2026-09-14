@@ -92,6 +92,11 @@ const statements = [
     sort_order INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS scenario_message_tags (
+    message_key TEXT NOT NULL,
+    tag_id INTEGER NOT NULL,
+    UNIQUE(message_key, tag_id)
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status)`,
   `CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id)`,
@@ -99,6 +104,7 @@ const statements = [
   `CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_created ON chat_messages(telegram_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(is_unread, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_scenario_messages_scenario_order ON scenario_messages(scenario_key, sort_order)`,
+  `CREATE INDEX IF NOT EXISTS idx_scenario_message_tags_tag ON scenario_message_tags(tag_id, message_key)`,
 ];
 
 let initialized = false;

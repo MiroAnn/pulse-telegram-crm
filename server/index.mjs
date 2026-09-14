@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS deliveries (id INTEGER PRIMARY KEY AUTOINCREMENT, cam
 CREATE TABLE IF NOT EXISTS quiz_sessions (telegram_id TEXT PRIMARY KEY, answers_json TEXT NOT NULL DEFAULT '[]', current_step INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active', result TEXT, details TEXT, started_at TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id TEXT NOT NULL, telegram_message_id INTEGER, direction TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', text TEXT NOT NULL, scenario TEXT NOT NULL DEFAULT 'freeform', is_unread INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(telegram_id, telegram_message_id, direction));
 CREATE TABLE IF NOT EXISTS scenario_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_key TEXT NOT NULL UNIQUE, scenario_key TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, tag_name TEXT, tag_color TEXT NOT NULL DEFAULT 'violet', sort_order INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scenario_message_tags (message_key TEXT NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(message_key, tag_id));
 CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id);
@@ -30,6 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_quiz_sessions_status ON quiz_sessions(status, upd
 CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_created ON chat_messages(telegram_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON chat_messages(is_unread, created_at);
 CREATE INDEX IF NOT EXISTS idx_scenario_messages_scenario_order ON scenario_messages(scenario_key, sort_order);
+CREATE INDEX IF NOT EXISTS idx_scenario_message_tags_tag ON scenario_message_tags(tag_id, message_key);
 PRAGMA optimize;
 `);
 
@@ -61,12 +63,19 @@ const DEFAULT_SCENARIO_MESSAGES = [
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
 for (const item of DEFAULT_SCENARIO_MESSAGES) insertScenarioMessage.run(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now());
-db.prepare("UPDATE scenario_messages SET tag_name='начал_анкету',tag_color='violet',updated_at=? WHERE message_key='quiz_q1' AND tag_name IS NULL").run(now());
+for (const item of DEFAULT_SCENARIO_MESSAGES.filter(item => item.tag)) {
+  db.prepare("INSERT OR IGNORE INTO tags (name,color) VALUES (?,?)").run(item.tag, item.color);
+  db.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key,tag_id) SELECT ?,t.id FROM tags t JOIN scenario_messages sm ON sm.message_key=? WHERE t.name=? AND sm.tag_name=?").run(item.key, item.key, item.tag, item.tag);
+}
 
 function scenarioMessage(key) {
   const value = db.prepare("SELECT * FROM scenario_messages WHERE message_key=?").get(key);
   if (!value) throw new Error(`Scenario message not found: ${key}`);
-  return value;
+  return { ...value, tags: db.prepare("SELECT t.* FROM tags t JOIN scenario_message_tags smt ON smt.tag_id=t.id WHERE smt.message_key=? ORDER BY t.name").all(key) };
+}
+
+function applyScenarioTags(telegramId, item) {
+  for (const tag of item.tags) tagCustomer(telegramId, tag.name, tag.color);
 }
 
 const sql = {
@@ -154,7 +163,7 @@ function tagCustomer(telegramId, name, color) {
 async function question(chatId, telegramId, step) {
   const item = scenarioMessage(`quiz_q${step}`);
   await send(chatId, { text: item.message, reply_markup: { inline_keyboard: [[{ text: "Да", callback_data: `quiz:${step}:yes` }, { text: "Нет", callback_data: `quiz:${step}:no` }]] } }, "quiz");
-  if (item.tag_name) tagCustomer(telegramId, item.tag_name, item.tag_color);
+  applyScenarioTags(telegramId, item);
 }
 async function startQuiz(chatId, telegramId) {
   const timestamp = now();
@@ -176,12 +185,12 @@ async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answe
   db.prepare("UPDATE quiz_sessions SET answers_json=?, status=?, result=?, completed_at=?, updated_at=? WHERE telegram_id=?").run(JSON.stringify(answers), consultation ? "awaiting_details" : "completed", consultation ? "consultation" : "eligible", timestamp, timestamp, telegramId);
   if (consultation) {
     const item = scenarioMessage("quiz_consultation");
-    if (item.tag_name) tagCustomer(telegramId, item.tag_name, item.tag_color);
     await send(chatId, { text: item.message }, "quiz_result");
+    applyScenarioTags(telegramId, item);
   } else {
     const item = scenarioMessage("quiz_eligible");
-    if (item.tag_name) tagCustomer(telegramId, item.tag_name, item.tag_color);
     await send(chatId, { text: item.message, reply_markup: { inline_keyboard: [[{ text: "Посмотреть тарифы", url: TARIFFS_URL }]] } }, "quiz_result");
+    applyScenarioTags(telegramId, item);
   }
 }
 async function handleUpdate(update) {
@@ -200,8 +209,8 @@ async function handleUpdate(update) {
   } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "webinar_signup" });
     const item = scenarioMessage("webinar_confirmation");
-    if (item.tag_name) tagCustomer(telegramId, item.tag_name, item.tag_color);
     await send(chatId, { text: item.message, link_preview_options: { is_disabled: true } }, "webinar_signup");
+    applyScenarioTags(telegramId, item);
   } else if (text === "/start") {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "start" });
     await send(chatId, { text: `Здравствуйте, ${user.first_name}! Нажмите кнопку ниже, чтобы поделиться номером телефона.`, reply_markup: { keyboard: [[{ text: "Поделиться телефоном", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } }, "start");
@@ -238,7 +247,8 @@ function dashboard() {
   const customers = db.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC").all().map(c => ({ ...c, avatar_url: publicAvatar(c.avatar_url), tags: grouped.get(Number(c.id)) || [], quiz: quizzes.get(String(c.telegram_id)) || null }));
   const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50").all();
   const messages = db.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC").all();
-  const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all();
+  const scenarioTags = db.prepare("SELECT smt.message_key,t.id,t.name,t.color FROM scenario_message_tags smt JOIN tags t ON t.id=smt.tag_id ORDER BY t.name").all();
+  const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all().map(message => ({ ...message, tags: scenarioTags.filter(tag => tag.message_key === message.message_key).map(tag => ({ id: tag.id, name: tag.name, color: tag.color })) }));
   const scenarioStarts = new Map(db.prepare("SELECT scenario,COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start','webinar_signup') GROUP BY scenario").all().map(item => [item.scenario, Number(item.joined_count)]));
   const scenarios = SCENARIOS.map(({ startEvent, ...item }) => ({ ...item, startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`, joinedCount: scenarioStarts.get(startEvent) || 0, messages: scenarioRows.filter(message => message.scenario_key === item.key) }));
   return { customers, tags, campaigns, messages, scenarios, stats: { customers: customers.filter(c => c.status === "active" && !c.is_demo).length, reachable: customers.filter(c => c.status === "active" && !c.is_demo).length, campaigns: campaigns.length, scheduled: campaigns.filter(c => c.status === "scheduled").length, unread: messages.filter(m => m.direction === "inbound" && m.is_unread).length } };
@@ -257,7 +267,12 @@ async function action(input) {
   } else if (input.action === "cancel-campaign") {
     db.prepare("UPDATE campaigns SET status='cancelled',updated_at=? WHERE id=? AND status='scheduled'").run(timestamp, Number(input.campaignId));
   } else if (input.action === "update-scenario-message") {
-    const messageKey = String(input.messageKey || ""); const message = String(input.message || "").trim(); if (!messageKey || !message) throw new Error("Введите текст сообщения"); if (message.length > 4096) throw new Error("Сообщение Telegram не может быть длиннее 4096 символов"); const result = db.prepare("UPDATE scenario_messages SET message=?,updated_at=? WHERE message_key=?").run(message, timestamp, messageKey); if (!result.changes) throw new Error("Сообщение сценария не найдено");
+    const messageKey = String(input.messageKey || ""); const message = String(input.message || "").trim(); if (!messageKey || !message) throw new Error("Введите текст сообщения"); if (message.length > 4096) throw new Error("Сообщение Telegram не может быть длиннее 4096 символов"); const existing = db.prepare("SELECT id FROM scenario_messages WHERE message_key=?").get(messageKey); if (!existing) throw new Error("Сообщение сценария не найдено");
+    const tagIds = ids(input.tagIds); const newTagNames = [...new Set((Array.isArray(input.newTagNames) ? input.newTagNames : []).map(value => String(value).trim()).filter(Boolean))]; if (newTagNames.some(name => name.length > 60)) throw new Error("Название тега не может быть длиннее 60 символов"); if (tagIds.length + newTagNames.length > 20) throw new Error("К одному сообщению можно добавить не более 20 тегов");
+    for (const name of newTagNames) db.prepare("INSERT OR IGNORE INTO tags (name,color) VALUES (?,'violet')").run(name);
+    const validTagIds = tagIds.length ? db.prepare(`SELECT id FROM tags WHERE id IN (${tagIds.map(() => "?").join(",")})`).all(...tagIds).map(tag => Number(tag.id)) : [];
+    for (const name of newTagNames) { const tag = db.prepare("SELECT id FROM tags WHERE name=?").get(name); if (tag) validTagIds.push(Number(tag.id)); }
+    db.exec("BEGIN"); try { db.prepare("UPDATE scenario_messages SET message=?,tag_name=NULL,updated_at=? WHERE message_key=?").run(message, timestamp, messageKey); db.prepare("DELETE FROM scenario_message_tags WHERE message_key=?").run(messageKey); for (const tagId of new Set(validTagIds)) db.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key,tag_id) VALUES (?,?)").run(messageKey, tagId); db.exec("COMMIT"); } catch (error) { db.exec("ROLLBACK"); throw error; }
   } else if (input.action === "mark-chat-read") {
     db.prepare("UPDATE chat_messages SET is_unread=0 WHERE telegram_id=? AND direction='inbound'").run(String(input.telegramId || ""));
   } else if (input.action === "send-chat-message") {

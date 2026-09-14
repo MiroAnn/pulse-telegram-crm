@@ -36,6 +36,13 @@
       "when": 1789389129581,
       "tag": "0004_chilly_bromley",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789390330768,
+      "tag": "0005_sweet_molten_man",
+      "breakpoints": true
     }
   ]
 }

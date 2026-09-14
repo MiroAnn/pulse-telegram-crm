@@ -131,3 +131,15 @@ export const scenarioMessages = sqliteTable(
     index("idx_scenario_messages_scenario_order").on(table.scenarioKey, table.sortOrder),
   ],
 );
+
+export const scenarioMessageTags = sqliteTable(
+  "scenario_message_tags",
+  {
+    messageKey: text("message_key").notNull(),
+    tagId: integer("tag_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_scenario_message_tags_pair").on(table.messageKey, table.tagId),
+    index("idx_scenario_message_tags_tag").on(table.tagId, table.messageKey),
+  ],
+);
