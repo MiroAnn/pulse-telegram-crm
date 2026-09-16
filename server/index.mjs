@@ -8,6 +8,7 @@ const token = process.env.TELEGRAM_BOT_TOKEN || "";
 const adminPassword = process.env.ADMIN_PASSWORD || "";
 const adminOrigin = process.env.ADMIN_ORIGIN || "https://miroann.github.io";
 const publicApiUrl = (process.env.PUBLIC_API_URL || "").replace(/\/$/, "");
+const telegramApiBase = (process.env.TELEGRAM_API_BASE_URL || "https://api.telegram.org").replace(/\/$/, "");
 const port = Number(process.env.PORT || 4100);
 const dataDir = process.env.DATA_DIR || "/app/data";
 if (!token || !adminPassword) throw new Error("TELEGRAM_BOT_TOKEN and ADMIN_PASSWORD are required");
@@ -126,7 +127,7 @@ async function telegram(method, payload = {}) {
   const retryableCodes = new Set(["UND_ERR_CONNECT_TIMEOUT", "ETIMEDOUT", "ENETUNREACH", "EAI_AGAIN"]);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await fetch(`${telegramApiBase}/bot${token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const result = await response.json();
       if (!result.ok) throw new Error(result.description || `Telegram ${response.status}`);
       return result.result;
@@ -155,9 +156,22 @@ async function avatarPath(userId) {
     return file.file_path || null;
   } catch { return null; }
 }
-async function upsertCustomer(user, phone = null) {
-  const timestamp = now(); const avatar = await avatarPath(user.id);
-  sql.customer.run(String(user.id), user.username || null, user.first_name, user.last_name || null, phone, avatar, timestamp, timestamp);
+const avatarRefreshes = new Set();
+async function refreshCustomerAvatar(telegramId) {
+  if (avatarRefreshes.has(telegramId)) return;
+  avatarRefreshes.add(telegramId);
+  try {
+    const avatar = await avatarPath(telegramId);
+    if (avatar) db.prepare("UPDATE customers SET avatar_url=?,updated_at=? WHERE telegram_id=?").run(avatar, now(), telegramId);
+  } finally {
+    avatarRefreshes.delete(telegramId);
+  }
+}
+function upsertCustomer(user, phone = null) {
+  const telegramId = String(user.id); const timestamp = now();
+  const existing = db.prepare("SELECT avatar_url FROM customers WHERE telegram_id=?").get(telegramId);
+  sql.customer.run(telegramId, user.username || null, user.first_name, user.last_name || null, phone, null, timestamp, timestamp);
+  if (!existing?.avatar_url) void refreshCustomerAvatar(telegramId);
 }
 function tagCustomer(telegramId, name, color) {
   db.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").run(name, color);
@@ -200,7 +214,7 @@ async function handleUpdate(update) {
   const callback = update.callback_query; const message = update.message;
   const user = callback?.from || message?.from; const chatId = callback?.message?.chat?.id || message?.chat?.id;
   if (!user || !chatId) return;
-  await upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
+  upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
   if (callback?.data && callback.message) {
     const match = callback.data.match(/^quiz:(\d+):(yes|no)$/);
     if (match) await quizAnswer(callback.id, chatId, callback.message.message_id, telegramId, Number(match[1]), match[2] === "yes");
@@ -306,7 +320,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/avatar") {
       const path = url.searchParams.get("path") || ""; const sig = url.searchParams.get("sig") || "";
       if (!path || path.includes("..") || !safeEqual(signAvatar(path), sig)) return respond(req, res, 403, { error: "Forbidden" });
-      const response = await fetch(`https://api.telegram.org/file/bot${token}/${path}`); res.writeHead(response.status, { "Content-Type": response.headers.get("content-type") || "application/octet-stream", "Cache-Control": "private, max-age=3600" }); res.end(Buffer.from(await response.arrayBuffer())); return;
+      const response = await fetch(`${telegramApiBase}/file/bot${token}/${path}`); res.writeHead(response.status, { "Content-Type": response.headers.get("content-type") || "application/octet-stream", "Cache-Control": "private, max-age=3600" }); res.end(Buffer.from(await response.arrayBuffer())); return;
     }
     if (url.pathname === "/api/dashboard") {
       if (!authorized(req)) return respond(req, res, 401, { error: "Неверный пароль" }, { "WWW-Authenticate": 'Basic realm="Pulse"' });
