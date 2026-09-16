@@ -189,7 +189,11 @@ async function startQuiz(chatId, telegramId) {
 }
 async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answer) {
   const session = db.prepare("SELECT answers_json, current_step, status FROM quiz_sessions WHERE telegram_id=?").get(telegramId);
-  await telegram("answerCallbackQuery", { callback_query_id: callbackId });
+  try {
+    await telegram("answerCallbackQuery", { callback_query_id: callbackId });
+  } catch (error) {
+    if (!String(error?.message || error).includes("query is too old")) throw error;
+  }
   if (!session || session.status !== "active" || session.current_step !== step) return;
   await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
   const answers = JSON.parse(session.answers_json); answers.push(answer); const timestamp = now();
@@ -339,7 +343,11 @@ async function poll() {
     try {
       if (!webhookCleared) { await telegram("deleteWebhook", { drop_pending_updates: false }); webhookCleared = true; }
       const updates = await telegram("getUpdates", { offset, timeout: 25, allowed_updates: ["message", "callback_query"] });
-      for (const update of updates) { await handleUpdate(update); offset = update.update_id + 1; }
+      for (const update of updates) {
+        offset = update.update_id + 1;
+        try { await handleUpdate(update); }
+        catch (error) { console.error(`Telegram update ${update.update_id}:`, error.message || error); }
+      }
     } catch (error) { console.error("Telegram polling:", error.message || error); await new Promise(resolve => setTimeout(resolve, 2500)); }
   }
 }
