@@ -218,13 +218,14 @@ async function handleUpdate(update) {
   const callback = update.callback_query; const message = update.message;
   const user = callback?.from || message?.from; const chatId = callback?.message?.chat?.id || message?.chat?.id;
   if (!user || !chatId) return;
+  const text = message?.text?.trim() || message?.caption?.trim() || "";
+  if (!callback && /^\/start(?:@\w+)?$/i.test(text)) return;
   upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
   if (callback?.data && callback.message) {
     const match = callback.data.match(/^quiz:(\d+):(yes|no)$/);
     if (match) await quizAnswer(callback.id, chatId, callback.message.message_id, telegramId, Number(match[1]), match[2] === "yes");
     return;
   }
-  const text = message?.text?.trim() || message?.caption?.trim() || "";
   if (/^\/start(?:\s+|=)test$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "quiz_start" }); await startQuiz(chatId, telegramId);
   } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
@@ -232,9 +233,6 @@ async function handleUpdate(update) {
     const item = scenarioMessage("webinar_confirmation");
     await send(chatId, { text: item.message, link_preview_options: { is_disabled: true } }, "webinar_signup");
     applyScenarioTags(telegramId, item);
-  } else if (text === "/start") {
-    record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "start" });
-    await send(chatId, { text: `Здравствуйте, ${user.first_name}! Нажмите кнопку ниже, чтобы поделиться номером телефона.`, reply_markup: { keyboard: [[{ text: "Поделиться телефоном", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } }, "start");
   } else if (message?.contact) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", kind: "contact", text: `Контакт: ${message.contact.phone_number}`, scenario: "contact" });
     await send(chatId, { text: "Спасибо! Контакт сохранён. Теперь отправьте email одним сообщением или нажмите «Пропустить».", reply_markup: { keyboard: [[{ text: "Пропустить" }]], resize_keyboard: true, one_time_keyboard: true } }, "contact");
