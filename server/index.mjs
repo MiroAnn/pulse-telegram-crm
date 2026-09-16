@@ -38,7 +38,8 @@ PRAGMA optimize;
 `);
 
 const TARIFFS_URL = "https://course.dariakavunenko.ru/tarifs/?utm_source=telegram";
-const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
+const LEGACY_POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
+const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fo/bn0261whs2n8ud4mgbu1f/AAf5zPKtz43Dp_W4pDXBiW0?rlkey=zkywvqide5hglax6dcdean3ae&dl=0";
 const WEBINAR_MESSAGE = `Здравствуйте!
 
 Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
@@ -65,6 +66,7 @@ const DEFAULT_SCENARIO_MESSAGES = [
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
 for (const item of DEFAULT_SCENARIO_MESSAGES) insertScenarioMessage.run(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now());
+db.prepare("UPDATE scenario_messages SET message=replace(message, ?, ?),updated_at=? WHERE message_key='webinar_confirmation' AND instr(message, ?)>0").run(LEGACY_POSTURE_GUIDE_URL, POSTURE_GUIDE_URL, now(), LEGACY_POSTURE_GUIDE_URL);
 db.prepare("DELETE FROM scenario_message_tags WHERE message_key='quiz_details_received'").run();
 db.prepare("DELETE FROM scenario_messages WHERE message_key='quiz_details_received'").run();
 for (const item of DEFAULT_SCENARIO_MESSAGES.filter(item => item.tag)) {
