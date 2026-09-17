@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT
 CREATE TABLE IF NOT EXISTS customer_tags (customer_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(customer_id, tag_id));
 CREATE TABLE IF NOT EXISTS campaigns (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, message TEXT NOT NULL, audience_mode TEXT NOT NULL DEFAULT 'all', excluded_tag_ids TEXT NOT NULL DEFAULT '[]', included_tag_ids TEXT NOT NULL DEFAULT '[]', scheduled_at TEXT, status TEXT NOT NULL DEFAULT 'draft', sent_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS deliveries (id INTEGER PRIMARY KEY AUTOINCREMENT, campaign_id INTEGER NOT NULL, customer_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT, sent_at TEXT, UNIQUE(campaign_id, customer_id));
-CREATE TABLE IF NOT EXISTS quiz_sessions (telegram_id TEXT PRIMARY KEY, answers_json TEXT NOT NULL DEFAULT '[]', current_step INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active', result TEXT, details TEXT, started_at TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS quiz_sessions (telegram_id TEXT PRIMARY KEY, answers_json TEXT NOT NULL DEFAULT '[]', concerns_json TEXT NOT NULL DEFAULT '[]', current_step INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active', result TEXT, details TEXT, started_at TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id TEXT NOT NULL, telegram_message_id INTEGER, direction TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', text TEXT NOT NULL, scenario TEXT NOT NULL DEFAULT 'freeform', is_unread INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(telegram_id, telegram_message_id, direction));
 CREATE TABLE IF NOT EXISTS scenario_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_key TEXT NOT NULL UNIQUE, scenario_key TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, tag_name TEXT, tag_color TEXT NOT NULL DEFAULT 'violet', sort_order INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scenario_message_tags (message_key TEXT NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(message_key, tag_id));
@@ -36,10 +36,21 @@ CREATE INDEX IF NOT EXISTS idx_scenario_messages_scenario_order ON scenario_mess
 CREATE INDEX IF NOT EXISTS idx_scenario_message_tags_tag ON scenario_message_tags(tag_id, message_key);
 PRAGMA optimize;
 `);
+if (!db.prepare("PRAGMA table_info(quiz_sessions)").all().some(column => column.name === "concerns_json")) db.exec("ALTER TABLE quiz_sessions ADD COLUMN concerns_json TEXT NOT NULL DEFAULT '[]'");
 
 const TARIFFS_URL = "https://course.dariakavunenko.ru/tarifs/?utm_source=telegram";
 const LEGACY_POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
 const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fo/bn0261whs2n8ud4mgbu1f/AAf5zPKtz43Dp_W4pDXBiW0?rlkey=zkywvqide5hglax6dcdean3ae&dl=0";
+const QUIZ_CONCERNS = [
+  { key: "back", label: "Спина / поясница" },
+  { key: "neck", label: "Шея / между лопатками" },
+  { key: "joints", label: "Суставы" },
+  { key: "legs", label: "Ноги / стопы" },
+  { key: "posture", label: "Осанка / сутулость" },
+  { key: "stiffness", label: "Скованность движений" },
+  { key: "headaches", label: "Головные боли" },
+  { key: "other", label: "Другое" },
+];
 const WEBINAR_MESSAGE = `Здравствуйте!
 
 Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
@@ -56,6 +67,7 @@ const SCENARIOS = [
 ];
 for (const scenario of SCENARIOS) db.prepare("INSERT OR IGNORE INTO scenario_settings (scenario_key,is_hidden,updated_at) VALUES (?,0,?)").run(scenario.key, now());
 const DEFAULT_SCENARIO_MESSAGES = [
+  { key: "quiz_concerns", scenario: "test", title: "Что хотелось бы улучшить", message: '<b>Что сейчас беспокоит вас больше всего? Над чем хотелось бы поработать на курсе?</b>\n\nМожно выбрать несколько вариантов.', tag: null, color: "violet", order: 5 },
   { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: '<b>Можно ли вам идти на курс «Здоровая спина» с Дарьей Кавуненко?</b>\nОтветьте на 4 вопроса и узнайте\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: "начал_анкету", color: "violet", order: 10 },
   { key: "quiz_q2", scenario: "test", title: "Вопрос 2 из 4", message: '2/4\n<b>Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?</b>', tag: null, color: "violet", order: 20 },
   { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
@@ -184,10 +196,47 @@ async function question(chatId, telegramId, step) {
   await send(chatId, { text: item.message, reply_markup: { inline_keyboard: [[{ text: "Да", callback_data: `quiz:${step}:yes` }, { text: "Нет", callback_data: `quiz:${step}:no` }]] } }, "quiz");
   applyScenarioTags(telegramId, item);
 }
+function concernsKeyboard(selected) {
+  return {
+    inline_keyboard: [
+      ...QUIZ_CONCERNS.map(item => [{ text: `${selected.includes(item.key) ? "✅" : "▫️"} ${item.label}`, callback_data: `concern:${item.key}` }]),
+      [{ text: "Отправить", callback_data: "concern:submit" }],
+    ],
+  };
+}
 async function startQuiz(chatId, telegramId) {
   const timestamp = now();
-  db.prepare(`INSERT INTO quiz_sessions (telegram_id, answers_json, current_step, status, result, details, started_at, completed_at, updated_at) VALUES (?, '[]', 1, 'active', NULL, NULL, ?, NULL, ?) ON CONFLICT(telegram_id) DO UPDATE SET answers_json='[]', current_step=1, status='active', result=NULL, details=NULL, started_at=excluded.started_at, completed_at=NULL, updated_at=excluded.updated_at`).run(telegramId, timestamp, timestamp);
-  await question(chatId, telegramId, 1);
+  db.prepare(`INSERT INTO quiz_sessions (telegram_id, answers_json, concerns_json, current_step, status, result, details, started_at, completed_at, updated_at) VALUES (?, '[]', '[]', 0, 'selecting_concerns', NULL, NULL, ?, NULL, ?) ON CONFLICT(telegram_id) DO UPDATE SET answers_json='[]', concerns_json='[]', current_step=0, status='selecting_concerns', result=NULL, details=NULL, started_at=excluded.started_at, completed_at=NULL, updated_at=excluded.updated_at`).run(telegramId, timestamp, timestamp);
+  const item = scenarioMessage("quiz_concerns");
+  await send(chatId, { text: item.message, reply_markup: concernsKeyboard([]) }, "quiz");
+}
+async function concernAnswer(callbackId, chatId, messageId, telegramId, value) {
+  const session = db.prepare("SELECT concerns_json,status FROM quiz_sessions WHERE telegram_id=?").get(telegramId);
+  if (!session || session.status !== "selecting_concerns") {
+    await telegram("answerCallbackQuery", { callback_query_id: callbackId });
+    return;
+  }
+  const selected = JSON.parse(session.concerns_json || "[]");
+  if (value === "submit") {
+    if (!selected.length) {
+      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Выберите хотя бы один вариант", show_alert: true });
+      return;
+    }
+    await telegram("answerCallbackQuery", { callback_query_id: callbackId });
+    await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
+    const choices = selected.map(key => QUIZ_CONCERNS.find(item => item.key === key)).filter(Boolean);
+    record({ telegramId, direction: "inbound", text: choices.map(item => item.label).join(", "), scenario: "quiz_concerns" });
+    for (const item of choices) tagCustomer(telegramId, `Беспокоит: ${item.label}`, "violet");
+    db.prepare("UPDATE quiz_sessions SET current_step=1,status='active',updated_at=? WHERE telegram_id=?").run(now(), telegramId);
+    await question(chatId, telegramId, 1);
+    return;
+  }
+  const option = QUIZ_CONCERNS.find(item => item.key === value);
+  if (!option) return;
+  const next = selected.includes(value) ? selected.filter(key => key !== value) : [...selected, value];
+  db.prepare("UPDATE quiz_sessions SET concerns_json=?,updated_at=? WHERE telegram_id=?").run(JSON.stringify(next), now(), telegramId);
+  await telegram("answerCallbackQuery", { callback_query_id: callbackId });
+  await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: concernsKeyboard(next) });
 }
 async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answer) {
   const session = db.prepare("SELECT answers_json, current_step, status FROM quiz_sessions WHERE telegram_id=?").get(telegramId);
@@ -224,6 +273,8 @@ async function handleUpdate(update) {
   if (!callback && /^\/start(?:@\w+)?$/i.test(text)) return;
   upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
   if (callback?.data && callback.message) {
+    const concern = callback.data.match(/^concern:(back|neck|joints|legs|posture|stiffness|headaches|other|submit)$/);
+    if (concern) { await concernAnswer(callback.id, chatId, callback.message.message_id, telegramId, concern[1]); return; }
     const match = callback.data.match(/^quiz:(\d+):(yes|no)$/);
     if (match) await quizAnswer(callback.id, chatId, callback.message.message_id, telegramId, Number(match[1]), match[2] === "yes");
     return;
