@@ -73,7 +73,7 @@ const DEFAULT_SCENARIO_MESSAGES = [
   { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
   { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
   { key: "quiz_consultation", scenario: "test", title: "Результат: нужна консультация", message: '<b>Участие в курсе стоит обсудить с Дарьей</b>\n\nВы ответили «Да» минимум на один из вопросов, но, если хотите пойти на курс, пожалуйста, напишите сюда в бота подробности вашей ситуации и помощница Анна вместе с Дарьей обсудит ваше участие в курсе.', tag: "Нужна консультация", color: "amber", order: 50 },
-  { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '<b>У вас нет противопоказаний. Можно переходить к занятиям.</b>', tag: "Тест пройден", color: "mint", order: 60 },
+  { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '👍 <b>У вас нет противопоказаний. Можно переходить к занятиям.</b>', tag: "Тест пройден", color: "mint", order: 60 },
   { key: "webinar_confirmation", scenario: "vebinarspina", title: "Подтверждение регистрации", message: WEBINAR_MESSAGE, tag: "Вебинар_спина", color: "violet", order: 10 },
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
@@ -206,7 +206,7 @@ function concernsKeyboard(selected) {
 }
 function eligibleMessage(baseMessage, selected) {
   const choices = selected.map(key => QUIZ_CONCERNS.find(item => item.key === key)).filter(Boolean);
-  const courseText = `<b>На курсе вы получите систему, которая поможет проработать боли в каждой из указанных вами проблемных зон, ведь одно конкретное упражнение на проблемную зону не помогает – нужны комплекс и системный подход.</b>\n\nА еще очень важно – регулярно заниматься. Поэтому я подготовила чек-лист, который поможет выполнять занятия регулярно и не пропускать. На курсе, кстати, будут созданы специальные условия, чтобы вы занимались и достигли результата.`;
+  const courseText = `<b>На курсе будет система, которая поможет проработать боли в каждой из указанных вами проблемных зон, ведь одно конкретное упражнение на проблемную зону не помогает – нужны комплекс и системный подход.</b>\n\n👏 А еще очень важно – регулярно заниматься. Поэтому <b>я подготовила чек-лист,</b> который поможет выполнять упражнения каждый день и не пропускать. На курсе, кстати, будут созданы специальные условия, чтобы вы занимались регулярно и достигли результата.`;
   if (!choices.length) return `${baseMessage}\n\n${courseText}`;
   const concerns = choices.map(item => `• ${item.label}`).join("\n");
   return `${baseMessage}\n\n<b>Вы хотите поработать с:</b>\n${concerns}\n\n${courseText}`;
