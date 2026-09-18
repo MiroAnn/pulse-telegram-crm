@@ -216,10 +216,10 @@ function concernsKeyboard(selected) {
 }
 function eligibleMessage(baseMessage, selected) {
   const choices = selected.map(key => QUIZ_CONCERNS.find(item => item.key === key)).filter(Boolean);
-  if (!choices.length) return `${baseMessage}\n\nНа курсе вас ждёт последовательная система занятий, которая поможет лучше понимать своё тело, развивать подвижность и укреплять мышцы.\n\nПосмотрите программу и выберите подходящий формат участия.`;
+  if (!choices.length) return `${baseMessage}\n\nНа курсе вас ждёт последовательная система занятий, которая поможет лучше понимать своё тело, развивать подвижность и укреплять мышцы.\n\nЗабрать памятку по регулярности упражнений и посмотреть тарифы курса.`;
   const concerns = choices.map(item => `• ${item.label}`).join("\n");
   const benefits = choices.map(item => `• ${QUIZ_CONCERN_BENEFITS[item.key]}`).join("\n");
-  return `${baseMessage}\n\n<b>Вы хотите поработать с:</b>\n${concerns}\n\n<b>На курсе вы сможете:</b>\n${benefits}\n\nВместо случайного набора упражнений вы получите последовательную систему занятий и сможете лучше понимать, какая нагрузка подходит вашему телу.\n\nПосмотрите программу и выберите подходящий формат участия.`;
+  return `${baseMessage}\n\n<b>Вы хотите поработать с:</b>\n${concerns}\n\n<b>На курсе вы сможете:</b>\n${benefits}\n\nВместо случайного набора упражнений вы получите последовательную систему занятий и сможете лучше понимать, какая нагрузка подходит вашему телу.\n\nЗабрать памятку по регулярности упражнений и посмотреть тарифы курса.`;
 }
 async function startQuiz(chatId, telegramId) {
   const timestamp = now();
