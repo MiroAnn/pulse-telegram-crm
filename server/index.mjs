@@ -51,16 +51,6 @@ const QUIZ_CONCERNS = [
   { key: "headaches", label: "Головные боли" },
   { key: "other", label: "Другое" },
 ];
-const QUIZ_CONCERN_BENEFITS = {
-  back: "мягко укреплять мышцы корпуса и учиться распределять нагрузку так, чтобы меньше перегружать спину и поясницу",
-  neck: "работать с подвижностью грудного отдела, положением лопаток и напряжением в области шеи",
-  joints: "развивать подвижность суставов и постепенно укреплять мышцы, которые помогают им справляться с нагрузкой",
-  legs: "укреплять стопы и ноги — опору, от которой во многом зависит движение всего тела",
-  posture: "улучшать осанку через подвижность, силу и новые двигательные привычки, а не попытки постоянно держать спину ровно",
-  stiffness: "постепенно возвращать телу свободу и уверенность движений без резких и сложных упражнений",
-  headaches: "мягко работать с подвижностью шеи и грудного отдела и наблюдать, как мышечное напряжение связано с самочувствием",
-  other: "лучше понимать сигналы своего тела и подбирать посильную нагрузку вместе с понятной системой занятий",
-};
 const WEBINAR_MESSAGE = `Здравствуйте!
 
 Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
@@ -83,7 +73,7 @@ const DEFAULT_SCENARIO_MESSAGES = [
   { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
   { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
   { key: "quiz_consultation", scenario: "test", title: "Результат: нужна консультация", message: '<b>Участие в курсе стоит обсудить с Дарьей</b>\n\nВы ответили «Да» минимум на один из вопросов, но, если хотите пойти на курс, пожалуйста, напишите сюда в бота подробности вашей ситуации и помощница Анна вместе с Дарьей обсудит ваше участие в курсе.', tag: "Нужна консультация", color: "amber", order: 50 },
-  { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '<b>По вашим ответам можно переходить к занятиям</b>\n\nВы не отметили состояний из анкеты, при которых мы рекомендуем сначала обсудить нагрузку с Дарьей.', tag: "Тест пройден", color: "mint", order: 60 },
+  { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '<b>У вас нет противопоказаний. Можно переходить к занятиям.</b>', tag: "Тест пройден", color: "mint", order: 60 },
   { key: "webinar_confirmation", scenario: "vebinarspina", title: "Подтверждение регистрации", message: WEBINAR_MESSAGE, tag: "Вебинар_спина", color: "violet", order: 10 },
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
@@ -216,10 +206,10 @@ function concernsKeyboard(selected) {
 }
 function eligibleMessage(baseMessage, selected) {
   const choices = selected.map(key => QUIZ_CONCERNS.find(item => item.key === key)).filter(Boolean);
-  if (!choices.length) return `${baseMessage}\n\nНа курсе вас ждёт последовательная система занятий, которая поможет лучше понимать своё тело, развивать подвижность и укреплять мышцы.\n\nЗабрать памятку по регулярности упражнений и посмотреть тарифы курса.`;
+  const courseText = `<b>На курсе вы получите систему, которая поможет проработать боли в каждой из указанных вами проблемных зон, ведь одно конкретное упражнение на проблемную зону не помогает – нужны комплекс и системный подход.</b>\n\nА еще очень важно – регулярно заниматься. Поэтому я подготовила чек-лист, который поможет выполнять занятия регулярно и не пропускать. На курсе, кстати, будут созданы специальные условия, чтобы вы занимались и достигли результата.`;
+  if (!choices.length) return `${baseMessage}\n\n${courseText}`;
   const concerns = choices.map(item => `• ${item.label}`).join("\n");
-  const benefits = choices.map(item => `• ${QUIZ_CONCERN_BENEFITS[item.key]}`).join("\n");
-  return `${baseMessage}\n\n<b>Вы хотите поработать с:</b>\n${concerns}\n\n<b>На курсе вы сможете:</b>\n${benefits}\n\nВместо случайного набора упражнений вы получите последовательную систему занятий и сможете лучше понимать, какая нагрузка подходит вашему телу.\n\nЗабрать памятку по регулярности упражнений и посмотреть тарифы курса.`;
+  return `${baseMessage}\n\n<b>Вы хотите поработать с:</b>\n${concerns}\n\n${courseText}`;
 }
 async function startQuiz(chatId, telegramId) {
   const timestamp = now();
@@ -279,7 +269,7 @@ async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answe
   } else {
     const item = scenarioMessage("quiz_eligible");
     const selected = JSON.parse(session.concerns_json || "[]");
-    await send(chatId, { text: eligibleMessage(item.message, selected), reply_markup: { inline_keyboard: [[{ text: "Посмотреть тарифы", url: TARIFFS_URL }]] } }, "quiz_result");
+    await send(chatId, { text: eligibleMessage(item.message, selected), reply_markup: { inline_keyboard: [[{ text: "Выбрать тариф и забрать чек-лист", url: TARIFFS_URL }]] } }, "quiz_result");
     applyScenarioTags(telegramId, item);
   }
 }
