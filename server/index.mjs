@@ -38,7 +38,7 @@ PRAGMA optimize;
 `);
 if (!db.prepare("PRAGMA table_info(quiz_sessions)").all().some(column => column.name === "concerns_json")) db.exec("ALTER TABLE quiz_sessions ADD COLUMN concerns_json TEXT NOT NULL DEFAULT '[]'");
 
-const TARIFFS_URL = "https://course.dariakavunenko.ru/";
+const TARIFFS_URL = "https://course.dariakavunenko.ru/?utm_source=telegram";
 const LEGACY_POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
 const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fo/bn0261whs2n8ud4mgbu1f/AAf5zPKtz43Dp_W4pDXBiW0?rlkey=zkywvqide5hglax6dcdean3ae&dl=0";
 const QUIZ_CONCERNS = [
