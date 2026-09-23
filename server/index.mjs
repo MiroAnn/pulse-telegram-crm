@@ -38,19 +38,15 @@ PRAGMA optimize;
 `);
 if (!db.prepare("PRAGMA table_info(quiz_sessions)").all().some(column => column.name === "concerns_json")) db.exec("ALTER TABLE quiz_sessions ADD COLUMN concerns_json TEXT NOT NULL DEFAULT '[]'");
 
-const TARIFFS_URL = "https://course.dariakavunenko.ru/?utm_source=telegram";
+const COURSE_URL = "https://course.dariakavunenko.ru/?utm_source=telegram";
+const CHECKLIST_URL = "https://www.dropbox.com/scl/fo/xf7wvh261mcom27njhfid/ABLZ-Uui-dW3t19TsIxnNIA?rlkey=y3a0ppbdymj3xbxp8u7qc5q6s&dl=0";
 const LEGACY_POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fi/3xyvw111dp1pzsai69imt/.pdf?rlkey=pkezbjoe1bb0rg3ghphnu3tod&dl=0";
 const POSTURE_GUIDE_URL = "https://www.dropbox.com/scl/fo/bn0261whs2n8ud4mgbu1f/AAf5zPKtz43Dp_W4pDXBiW0?rlkey=zkywvqide5hglax6dcdean3ae&dl=0";
-const QUIZ_CONCERNS = [
-  { key: "back", label: "Спина / поясница" },
-  { key: "neck", label: "Шея / между лопатками" },
-  { key: "joints", label: "Суставы" },
-  { key: "legs", label: "Ноги / стопы" },
-  { key: "posture", label: "Осанка / сутулость" },
-  { key: "stiffness", label: "Скованность движений" },
-  { key: "headaches", label: "Головные боли" },
-  { key: "other", label: "Другое" },
-];
+const TEST_MESSAGE = `Спасибо за интерес к курсу. По <a href="${CHECKLIST_URL}">ссылке</a> лежит чек-лист, который поможет выполнять упражнения регулярно и не сдаваться.
+
+Обратите внимание, что если у вас есть какие-то боли прямо сейчас, недавние травмы или онемения, то лучше перед курсом проконсультироваться с Дарьей (просто напишите сообщение этому боту).
+
+Если всего этого нет, то приглашаем вас на курс «Здоровая спина», после которого вы сможете двигаться легко и свободно. Ссылка по кнопке.`;
 const WEBINAR_MESSAGE = `Здравствуйте!
 
 Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
@@ -62,25 +58,19 @@ const WEBINAR_MESSAGE = `Здравствуйте!
 До встречи.`;
 
 const SCENARIOS = [
-  { key: "test", title: "Анкета «Здоровая спина»", startParam: "test", startEvent: "quiz_start" },
+  { key: "test", title: "Курс «Здоровая спина»", startParam: "test", startEvent: "quiz_start" },
   { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
 for (const scenario of SCENARIOS) db.prepare("INSERT OR IGNORE INTO scenario_settings (scenario_key,is_hidden,updated_at) VALUES (?,0,?)").run(scenario.key, now());
 const DEFAULT_SCENARIO_MESSAGES = [
-  { key: "quiz_concerns", scenario: "test", title: "Что хотелось бы улучшить", message: '<b>Что сейчас беспокоит вас больше всего? Над чем хотелось бы поработать на курсе?</b>\n\nМожно выбрать несколько вариантов.', tag: null, color: "violet", order: 5 },
-  { key: "quiz_q1", scenario: "test", title: "Вопрос 1 из 4", message: 'Хорошо! Теперь проверим, подходит ли вам курс по состоянию здоровья – не всегда упражнения полезны. Ответьте ещё на 4 коротких вопроса.\n\n1/4\n<b>Есть ли у вас сейчас сильная, острая или быстро усиливающаяся боль в спине, шее или суставах?</b>', tag: "начал_анкету", color: "violet", order: 10 },
-  { key: "quiz_q2", scenario: "test", title: "Вопрос 2 из 4", message: '2/4\n<b>Есть ли у вас онемение, выраженная слабость в руках или ногах, нарушение чувствительности или координации?</b>', tag: null, color: "violet", order: 20 },
-  { key: "quiz_q3", scenario: "test", title: "Вопрос 3 из 4", message: '3/4\n<b>Были ли у вас за последние 3 месяца травмы, переломы или операции на позвоночнике, суставах или конечностях?</b>', tag: null, color: "violet", order: 30 },
-  { key: "quiz_q4", scenario: "test", title: "Вопрос 4 из 4", message: '4/4\n<b>Есть ли у вас другие заболевания или состояния, при которых врач рекомендовал ограничить физическую активность (в том числе беременность)?</b>', tag: null, color: "violet", order: 40 },
-  { key: "quiz_consultation", scenario: "test", title: "Результат: нужна консультация", message: '<b>Участие в курсе стоит обсудить с Дарьей</b>\n\nВы ответили «Да» минимум на один из вопросов, но, если хотите пойти на курс, пожалуйста, напишите сюда в бота подробности вашей ситуации и помощница Анна вместе с Дарьей обсудит ваше участие в курсе.', tag: "Нужна консультация", color: "amber", order: 50 },
-  { key: "quiz_eligible", scenario: "test", title: "Результат: курс подходит", message: '👍 <b>У вас нет противопоказаний. Можно переходить к занятиям.</b>', tag: "Тест пройден", color: "mint", order: 60 },
+  { key: "test_invitation", scenario: "test", title: "Приглашение на курс", message: TEST_MESSAGE, tag: "начал_анкету", color: "violet", order: 10 },
   { key: "webinar_confirmation", scenario: "vebinarspina", title: "Подтверждение регистрации", message: WEBINAR_MESSAGE, tag: "Вебинар_спина", color: "violet", order: 10 },
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
 for (const item of DEFAULT_SCENARIO_MESSAGES) insertScenarioMessage.run(item.key, item.scenario, item.title, item.message, item.tag, item.color, item.order, now());
 db.prepare("UPDATE scenario_messages SET message=replace(message, ?, ?),updated_at=? WHERE message_key='webinar_confirmation' AND instr(message, ?)>0").run(LEGACY_POSTURE_GUIDE_URL, POSTURE_GUIDE_URL, now(), LEGACY_POSTURE_GUIDE_URL);
-db.prepare("DELETE FROM scenario_message_tags WHERE message_key='quiz_details_received'").run();
-db.prepare("DELETE FROM scenario_messages WHERE message_key='quiz_details_received'").run();
+db.prepare("DELETE FROM scenario_message_tags WHERE message_key LIKE 'quiz_%'").run();
+db.prepare("DELETE FROM scenario_messages WHERE message_key LIKE 'quiz_%'").run();
 for (const item of DEFAULT_SCENARIO_MESSAGES.filter(item => item.tag)) {
   db.prepare("INSERT OR IGNORE INTO tags (name,color) VALUES (?,?)").run(item.tag, item.color);
   db.prepare("INSERT OR IGNORE INTO scenario_message_tags (message_key,tag_id) SELECT ?,t.id FROM tags t JOIN scenario_messages sm ON sm.message_key=? WHERE t.name=? AND sm.tag_name=?").run(item.key, item.key, item.tag, item.tag);
@@ -191,88 +181,6 @@ function tagCustomer(telegramId, name, color) {
   db.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").run(name, color);
   db.prepare(`INSERT OR IGNORE INTO customer_tags (customer_id, tag_id) SELECT c.id, t.id FROM customers c, tags t WHERE c.telegram_id=? AND t.name=?`).run(telegramId, name);
 }
-async function question(chatId, telegramId, step) {
-  const item = scenarioMessage(`quiz_q${step}`);
-  await send(chatId, { text: item.message, reply_markup: { inline_keyboard: [[{ text: "Да", callback_data: `quiz:${step}:yes` }, { text: "Нет", callback_data: `quiz:${step}:no` }]] } }, "quiz");
-  applyScenarioTags(telegramId, item);
-}
-function concernsKeyboard(selected) {
-  return {
-    inline_keyboard: [
-      ...QUIZ_CONCERNS.map(item => [{ text: `${selected.includes(item.key) ? "✅" : "▫️"} ${item.label}`, callback_data: `concern:${item.key}` }]),
-      [{ text: "Отправить", callback_data: "concern:submit" }],
-    ],
-  };
-}
-function eligibleMessage(baseMessage, selected) {
-  const choices = selected.map(key => QUIZ_CONCERNS.find(item => item.key === key)).filter(Boolean);
-  const courseText = `<b>На курсе будет система, которая поможет проработать боли в каждой из указанных вами проблемных зон, ведь одно конкретное упражнение на проблемную зону не помогает – нужны комплекс и системный подход.</b>\n\n👏 А еще очень важно – регулярно заниматься. Поэтому <b>я подготовила чек-лист,</b> который поможет выполнять упражнения каждый день и не пропускать. На курсе, кстати, будут созданы специальные условия, чтобы вы занимались регулярно и достигли результата.`;
-  if (!choices.length) return `${baseMessage}\n\n${courseText}`;
-  const concerns = choices.map(item => `• ${item.label}`).join("\n");
-  return `${baseMessage}\n\n<b>Вы хотите поработать с:</b>\n${concerns}\n\n${courseText}`;
-}
-async function startQuiz(chatId, telegramId) {
-  const timestamp = now();
-  db.prepare(`INSERT INTO quiz_sessions (telegram_id, answers_json, concerns_json, current_step, status, result, details, started_at, completed_at, updated_at) VALUES (?, '[]', '[]', 0, 'selecting_concerns', NULL, NULL, ?, NULL, ?) ON CONFLICT(telegram_id) DO UPDATE SET answers_json='[]', concerns_json='[]', current_step=0, status='selecting_concerns', result=NULL, details=NULL, started_at=excluded.started_at, completed_at=NULL, updated_at=excluded.updated_at`).run(telegramId, timestamp, timestamp);
-  const item = scenarioMessage("quiz_concerns");
-  await send(chatId, { text: item.message, reply_markup: concernsKeyboard([]) }, "quiz");
-}
-async function concernAnswer(callbackId, chatId, messageId, telegramId, value) {
-  const session = db.prepare("SELECT concerns_json,status FROM quiz_sessions WHERE telegram_id=?").get(telegramId);
-  if (!session || session.status !== "selecting_concerns") {
-    await telegram("answerCallbackQuery", { callback_query_id: callbackId });
-    return;
-  }
-  const selected = JSON.parse(session.concerns_json || "[]");
-  if (value === "submit") {
-    if (!selected.length) {
-      await telegram("answerCallbackQuery", { callback_query_id: callbackId, text: "Выберите хотя бы один вариант", show_alert: true });
-      return;
-    }
-    await telegram("answerCallbackQuery", { callback_query_id: callbackId });
-    await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
-    const choices = selected.map(key => QUIZ_CONCERNS.find(item => item.key === key)).filter(Boolean);
-    record({ telegramId, direction: "inbound", text: choices.map(item => item.label).join(", "), scenario: "quiz_concerns" });
-    for (const item of choices) tagCustomer(telegramId, `Беспокоит: ${item.label}`, "violet");
-    db.prepare("UPDATE quiz_sessions SET current_step=1,status='active',updated_at=? WHERE telegram_id=?").run(now(), telegramId);
-    await question(chatId, telegramId, 1);
-    return;
-  }
-  const option = QUIZ_CONCERNS.find(item => item.key === value);
-  if (!option) return;
-  const next = selected.includes(value) ? selected.filter(key => key !== value) : [...selected, value];
-  db.prepare("UPDATE quiz_sessions SET concerns_json=?,updated_at=? WHERE telegram_id=?").run(JSON.stringify(next), now(), telegramId);
-  await telegram("answerCallbackQuery", { callback_query_id: callbackId });
-  await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: concernsKeyboard(next) });
-}
-async function quizAnswer(callbackId, chatId, messageId, telegramId, step, answer) {
-  const session = db.prepare("SELECT answers_json, concerns_json, current_step, status FROM quiz_sessions WHERE telegram_id=?").get(telegramId);
-  try {
-    await telegram("answerCallbackQuery", { callback_query_id: callbackId });
-  } catch (error) {
-    if (!String(error?.message || error).includes("query is too old")) throw error;
-  }
-  if (!session || session.status !== "active" || session.current_step !== step) return;
-  await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
-  const answers = JSON.parse(session.answers_json); answers.push(answer); const timestamp = now();
-  record({ telegramId, direction: "inbound", text: answer ? "Да" : "Нет", scenario: "quiz_answer" });
-  if (step < 4) {
-    db.prepare("UPDATE quiz_sessions SET answers_json=?, current_step=?, updated_at=? WHERE telegram_id=?").run(JSON.stringify(answers), step + 1, timestamp, telegramId);
-    await question(chatId, telegramId, step + 1); return;
-  }
-  const consultation = answers.some(Boolean);
-  db.prepare("UPDATE quiz_sessions SET answers_json=?, status=?, result=?, completed_at=?, updated_at=? WHERE telegram_id=?").run(JSON.stringify(answers), consultation ? "awaiting_details" : "completed", consultation ? "consultation" : "eligible", timestamp, timestamp, telegramId);
-  if (consultation) {
-    const item = scenarioMessage("quiz_consultation");
-    await send(chatId, { text: item.message }, "quiz_result");
-    applyScenarioTags(telegramId, item);
-  } else {
-    const item = scenarioMessage("quiz_eligible");
-    const selected = JSON.parse(session.concerns_json || "[]");
-    await send(chatId, { text: eligibleMessage(item.message, selected), reply_markup: { inline_keyboard: [[{ text: "Выбрать тариф и забрать чек-лист", url: TARIFFS_URL }]] } }, "quiz_result");
-    applyScenarioTags(telegramId, item);
-  }
-}
 async function handleUpdate(update) {
   const callback = update.callback_query; const message = update.message;
   const user = callback?.from || message?.from; const chatId = callback?.message?.chat?.id || message?.chat?.id;
@@ -281,14 +189,17 @@ async function handleUpdate(update) {
   if (!callback && /^\/start(?:@\w+)?$/i.test(text)) return;
   upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
   if (callback?.data && callback.message) {
-    const concern = callback.data.match(/^concern:(back|neck|joints|legs|posture|stiffness|headaches|other|submit)$/);
-    if (concern) { await concernAnswer(callback.id, chatId, callback.message.message_id, telegramId, concern[1]); return; }
-    const match = callback.data.match(/^quiz:(\d+):(yes|no)$/);
-    if (match) await quizAnswer(callback.id, chatId, callback.message.message_id, telegramId, Number(match[1]), match[2] === "yes");
+    try { await telegram("answerCallbackQuery", { callback_query_id: callback.id, text: "Этот сценарий обновлён" }); }
+    catch (error) { if (!String(error?.message || error).includes("query is too old")) throw error; }
+    try { await telegram("editMessageReplyMarkup", { chat_id: chatId, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } }); }
+    catch { /* Старое сообщение могло быть удалено. */ }
     return;
   }
   if (/^\/start(?:\s+|=)test$/i.test(text)) {
-    record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "quiz_start" }); await startQuiz(chatId, telegramId);
+    record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "quiz_start" });
+    const item = scenarioMessage("test_invitation");
+    await send(chatId, { text: item.message, link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[{ text: "Узнать о курсе", url: COURSE_URL }]] } }, "quiz_start");
+    applyScenarioTags(telegramId, item);
   } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "webinar_signup" });
     const item = scenarioMessage("webinar_confirmation");
