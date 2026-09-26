@@ -69,12 +69,23 @@ type Scenario = {
   isHidden: boolean;
   messages: ScenarioMessage[];
 };
+type TrackingLink = {
+  id: number;
+  name: string;
+  start_param: string;
+  start_link: string;
+  unique_visitors: number;
+  total_visits: number;
+  last_visit_at: string | null;
+  created_at: string;
+};
 type Dashboard = {
   customers: Customer[];
   tags: Tag[];
   campaigns: Campaign[];
   messages: ChatMessage[];
   scenarios: Scenario[];
+  trackingLinks: TrackingLink[];
   stats: { customers: number; reachable: number; campaigns: number; scheduled: number; unread: number };
 };
 
@@ -84,6 +95,7 @@ const emptyDashboard: Dashboard = {
   campaigns: [],
   messages: [],
   scenarios: [],
+  trackingLinks: [],
   stats: { customers: 0, reachable: 0, campaigns: 0, scheduled: 0, unread: 0 },
 };
 
@@ -142,7 +154,7 @@ function datetimeLocal(value: string | null) {
 export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized }: { apiBase?: string; authPassword?: string; onUnauthorized?: () => void } = {}) {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"customers" | "chats" | "segments" | "scenarios" | "campaigns">("customers");
+  const [view, setView] = useState<"customers" | "chats" | "segments" | "scenarios" | "campaigns" | "traffic">("customers");
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<number | "all">("all");
   const [selected, setSelected] = useState<Customer | null>(null);
@@ -150,6 +162,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const isVoprosy = apiBase.includes("pulse2.");
   const apiUrl = useCallback((path: string) => `${apiBase.replace(/\/$/, "")}${path}`, [apiBase]);
   const authHeaders = useMemo<Record<string, string>>(() => authPassword ? { Authorization: `Basic ${btoa(`admin:${authPassword}`)}` } : {}, [authPassword]);
 
@@ -161,7 +174,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
         if (response.status === 401) { onUnauthorized?.(); throw new Error("Неверный пароль"); }
         if (!response.ok) throw new Error("Не удалось загрузить данные");
         const result = await response.json() as Dashboard;
-        if (active) setData(result);
+        if (active) setData({ ...emptyDashboard, ...result, trackingLinks: result.trackingLinks ?? [] });
       } catch (error) {
         if (active) setNotice(error instanceof Error ? error.message : "Ошибка загрузки");
       } finally {
@@ -182,7 +195,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
     if (response.status === 401) onUnauthorized?.();
     const result = (await response.json()) as Dashboard & { error?: string };
     if (!response.ok) throw new Error(result.error ?? "Не удалось сохранить");
-    setData(result);
+    setData({ ...emptyDashboard, ...result, trackingLinks: result.trackingLinks ?? [] });
     if (selected) {
       setSelected(result.customers.find((item) => item.id === selected.id) ?? null);
     }
@@ -217,15 +230,18 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           <button className={view === "segments" ? "nav-item active" : "nav-item"} onClick={() => setView("segments")}>
             <span className="nav-icon">◇</span> Сегменты
           </button>
-          <button className={view === "scenarios" ? "nav-item active" : "nav-item"} onClick={() => setView("scenarios")}>
-            <span className="nav-icon">⌘</span> Сценарии
+          <button className={view === "traffic" ? "nav-item active" : "nav-item"} onClick={() => setView("traffic")}>
+            <span className="nav-icon">⌁</span> Ссылки <b>{data.trackingLinks.reduce((sum, link) => sum + link.unique_visitors, 0) || ""}</b>
           </button>
+          {!isVoprosy && <button className={view === "scenarios" ? "nav-item active" : "nav-item"} onClick={() => setView("scenarios")}>
+            <span className="nav-icon">⌘</span> Сценарии
+          </button>}
           <button className={view === "campaigns" ? "nav-item active" : "nav-item"} onClick={() => setView("campaigns")}>
             <span className="nav-icon">↗</span> Рассылки <b>{data.stats.scheduled || ""}</b>
           </button>
         </nav>
         <div className="sidebar-bottom">
-          <div className="bot-state"><span className="state-dot"/><div><strong>Telegram-бот</strong><small>Ожидает подключения</small></div></div>
+          <div className="bot-state"><span className="state-dot"/><div><strong>Telegram-бот</strong><small>Работает</small></div></div>
           <button className="settings-row"><span>⚙</span> Настройки</button>
           <div className="admin-row"><span className="admin-avatar">Д</span><div><strong>Даша</strong><small>Администратор</small></div></div>
         </div>
@@ -245,11 +261,11 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           {view === "customers" && (
             <>
               <div className="page-heading">
-                <div><span className="eyebrow">База аудитории</span><h1>Клиенты</h1><p>Все, кто начал диалог с вашим Telegram-ботом.</p></div>
+                <div><span className="eyebrow">База аудитории</span><h1>Подписчики</h1><p>Все, кто начал диалог с вашим Telegram-ботом.</p></div>
                 {!hasDemo && data.customers.length === 0 && <button className="secondary-button" onClick={() => void action({ action: "seed-demo" })}>Показать демо-данные</button>}
               </div>
               <div className="metrics-grid">
-                <article><span className="metric-icon purple">◎</span><div><small>Всего клиентов</small><strong>{data.stats.customers}</strong><em>реальных контактов</em></div></article>
+                <article><span className="metric-icon purple">◎</span><div><small>Всего подписчиков</small><strong>{data.stats.customers}</strong><em>реальных контактов</em></div></article>
                 <article><span className="metric-icon mint">✓</span><div><small>Доступны для связи</small><strong>{data.stats.reachable}</strong><em>бот не заблокирован</em></div></article>
                 <article><span className="metric-icon amber">↗</span><div><small>Рассылок</small><strong>{data.stats.campaigns}</strong><em>{data.stats.scheduled} запланировано</em></div></article>
               </div>
@@ -279,6 +295,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           )}
 
           {view === "segments" && <Segments data={data} action={action} />}
+          {view === "traffic" && <Traffic data={data} action={action} />}
           {view === "scenarios" && <Scenarios data={data} action={action} />}
           {view === "campaigns" && <Campaigns data={data} onCompose={() => { setEditingCampaign(null); setComposer(true); }} onEdit={(campaign) => { setEditingCampaign(campaign); setComposer(true); }} action={action} />}
           {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); }} />}
@@ -392,11 +409,67 @@ function Chats({ data, query, selectedChat, onSelect, onSend }: {
 function Segments({ data, action }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
   const [name, setName] = useState("");
   async function submit(event: FormEvent) { event.preventDefault(); if (!name.trim()) return; await action({ action: "create-tag", name, color: ["violet", "mint", "amber"][data.tags.length % 3] }); setName(""); }
+  async function removeTag(tag: Tag) {
+    if (!window.confirm(`Удалить тег «${tag.name}»? Он будет снят со всех подписчиков.`)) return;
+    await action({ action: "delete-tag", tagId: tag.id });
+  }
   return <>
-    <div className="page-heading"><div><span className="eyebrow">Умные группы</span><h1>Сегменты</h1><p>Теги помогают направлять сообщения только нужным клиентам.</p></div></div>
+    <div className="page-heading"><div><span className="eyebrow">Умные группы</span><h1>Теги</h1><p>Назначайте теги подписчикам и исключайте нужные группы из рассылок.</p></div></div>
     <div className="segment-layout">
       <form className="create-tag-card" onSubmit={submit}><span className="metric-icon purple">＋</span><h3>Новый тег</h3><p>Например: «Курс осанки», «VIP» или «Не отправлять акции».</p><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Название тега" /><button className="primary-button">Создать тег</button></form>
-      <div className="segments-list">{data.tags.length === 0 ? <div className="empty-state"><h3>Тегов пока нет</h3></div> : data.tags.map((tag) => { const count = data.customers.filter((customer) => customer.tags.some((item) => item.id === tag.id)).length; return <article key={tag.id}><i className={`tag-dot tag-${tag.color}`}/><div><strong>{tag.name}</strong><small>{count} {count === 1 ? "клиент" : "клиентов"}</small></div><span>›</span></article>; })}</div>
+      <div className="segments-list">{data.tags.length === 0 ? <div className="empty-state"><h3>Тегов пока нет</h3></div> : data.tags.map((tag) => { const count = data.customers.filter((customer) => customer.tags.some((item) => item.id === tag.id)).length; return <article key={tag.id}><i className={`tag-dot tag-${tag.color}`}/><div><strong>{tag.name}</strong><small>{count} {count === 1 ? "подписчик" : "подписчиков"}</small></div><button type="button" className="delete-tag-button" onClick={() => void removeTag(tag)} aria-label={`Удалить тег ${tag.name}`}>Удалить</button></article>; })}</div>
+    </div>
+  </>;
+}
+
+function Traffic({ data, action }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState<number | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      await action({ action: "create-tracking-link", name, slug });
+      setName(""); setSlug("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать ссылку");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy(link: TrackingLink) {
+    try {
+      await navigator.clipboard.writeText(link.start_link);
+      setCopied(link.id);
+      window.setTimeout(() => setCopied((current) => current === link.id ? null : current), 1600);
+    } catch {
+      setError("Не удалось скопировать ссылку. Выделите её вручную.");
+    }
+  }
+
+  return <>
+    <div className="page-heading"><div><span className="eyebrow">Источники аудитории</span><h1>Ссылки</h1><p>Создавайте отдельную ссылку для каждого поста или площадки и смотрите, сколько людей пришло.</p></div></div>
+    <div className="traffic-layout">
+      <form className="tracking-form" onSubmit={submit}>
+        <span className="metric-icon purple">⌁</span><h3>Новая ссылка</h3>
+        <p>Человек увидит тот же сценарий <b>/start ksenia</b>, а переход запишется за выбранным источником.</p>
+        <label className="field"><span>Название источника</span><input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} placeholder="Instagram — пост 26 сентября"/></label>
+        <label className="field"><span>Метка латиницей</span><input required maxLength={57} pattern="[A-Za-z0-9_-]+" value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))} placeholder="instagram_post"/></label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" disabled={busy}>{busy ? "Создаём…" : "Создать ссылку"}</button>
+      </form>
+      <div className="tracking-list">
+        {data.trackingLinks.length === 0 ? <div className="empty-state"><h3>Ссылок пока нет</h3><p>Создайте первую ссылку для публикации.</p></div> : data.trackingLinks.map((link) => <article className="tracking-row" key={link.id}>
+          <div className="tracking-copy"><strong>{link.name}</strong><code>{link.start_link}</code><small>Создана {niceDate(link.created_at)}{link.last_visit_at ? ` · последний переход ${niceDate(link.last_visit_at)}` : " · переходов пока нет"}</small></div>
+          <div className="tracking-stats"><span><strong>{link.unique_visitors}</strong><small>людей</small></span><span><strong>{link.total_visits}</strong><small>переходов</small></span></div>
+          <button type="button" className="copy-button" onClick={() => void copy(link)}>{copied === link.id ? "Скопировано" : "Копировать"}</button>
+        </article>)}
+      </div>
     </div>
   </>;
 }
