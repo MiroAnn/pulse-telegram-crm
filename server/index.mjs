@@ -47,6 +47,9 @@ const TEST_MESSAGE = `Спасибо за интерес к курсу. По <a 
 Обратите внимание, что если у вас есть какие-то боли прямо сейчас, недавние травмы или онемения, то лучше перед курсом проконсультироваться с Дарьей (просто напишите сообщение этому боту).
 
 Если всего этого нет, то приглашаем вас на курс «Здоровая спина», после которого вы сможете двигаться легко и свободно. Ссылка по кнопке.`;
+const LIVESTREAM_MESSAGE = `Спасибо за регистрацию на эфир завтра (29-ого сентября) в 19.00, на котором вы сможете получить диагностику и разбор своего случая (для этого пишите Алене в личку слово эфир – @dariaKav_help).
+
+За час до эфира пришлю ссылку (дело будет в зуме).`;
 const WEBINAR_MESSAGE = `Здравствуйте!
 
 Я зарегистрировал вас на вебинар – «<b>Почему упражнения не помогают?</b>» 21-ого сентября в 19.00, а также делюсь методичкой, как протестировать вашу осанку – правильная она или нет.
@@ -59,11 +62,13 @@ const WEBINAR_MESSAGE = `Здравствуйте!
 
 const SCENARIOS = [
   { key: "test", title: "Курс «Здоровая спина»", startParam: "test", startEvent: "quiz_start" },
+  { key: "livestream", title: "Регистрация на эфир", startParam: "livestream", startEvent: "livestream_signup" },
   { key: "vebinarspina", title: "Регистрация на вебинар", startParam: "vebinarspina", startEvent: "webinar_signup" },
 ];
 for (const scenario of SCENARIOS) db.prepare("INSERT OR IGNORE INTO scenario_settings (scenario_key,is_hidden,updated_at) VALUES (?,0,?)").run(scenario.key, now());
 const DEFAULT_SCENARIO_MESSAGES = [
   { key: "test_invitation", scenario: "test", title: "Приглашение на курс", message: TEST_MESSAGE, tag: "начал_анкету", color: "violet", order: 10 },
+  { key: "livestream_confirmation", scenario: "livestream", title: "Подтверждение регистрации", message: LIVESTREAM_MESSAGE, tag: "эфир2", color: "violet", order: 10 },
   { key: "webinar_confirmation", scenario: "vebinarspina", title: "Подтверждение регистрации", message: WEBINAR_MESSAGE, tag: "Вебинар_спина", color: "violet", order: 10 },
 ];
 const insertScenarioMessage = db.prepare("INSERT OR IGNORE INTO scenario_messages (message_key,scenario_key,title,message,tag_name,tag_color,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)");
@@ -202,7 +207,9 @@ async function handleUpdate(update) {
     applyScenarioTags(telegramId, item);
   } else if (/^\/start(?:\s+|=)livestream$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "livestream_signup" });
-    tagCustomer(telegramId, "эфир2", "violet");
+    const item = scenarioMessage("livestream_confirmation");
+    await send(chatId, { text: item.message, link_preview_options: { is_disabled: true } }, "livestream_signup");
+    applyScenarioTags(telegramId, item);
   } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "webinar_signup" });
     const item = scenarioMessage("webinar_confirmation");
@@ -242,7 +249,7 @@ function dashboard() {
   const messages = db.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC").all();
   const scenarioTags = db.prepare("SELECT smt.message_key,t.id,t.name,t.color FROM scenario_message_tags smt JOIN tags t ON t.id=smt.tag_id ORDER BY t.name").all();
   const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all().map(message => ({ ...message, tags: scenarioTags.filter(tag => tag.message_key === message.message_key).map(tag => ({ id: tag.id, name: tag.name, color: tag.color })) }));
-  const scenarioStarts = new Map(db.prepare("SELECT scenario,COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start','webinar_signup') GROUP BY scenario").all().map(item => [item.scenario, Number(item.joined_count)]));
+  const scenarioStarts = new Map(db.prepare("SELECT scenario,COUNT(DISTINCT telegram_id) AS joined_count FROM chat_messages WHERE scenario IN ('quiz_start','livestream_signup','webinar_signup') GROUP BY scenario").all().map(item => [item.scenario, Number(item.joined_count)]));
   const scenarioSettings = new Map(db.prepare("SELECT scenario_key,is_hidden FROM scenario_settings").all().map(item => [item.scenario_key, Boolean(item.is_hidden)]));
   const scenarios = SCENARIOS.map(({ startEvent, ...item }) => ({ ...item, isHidden: scenarioSettings.get(item.key) || false, startLink: `https://t.me/daryakavunenkobot?start=${item.startParam}`, joinedCount: scenarioStarts.get(startEvent) || 0, messages: scenarioRows.filter(message => message.scenario_key === item.key) }));
   return { customers, tags, campaigns, messages, scenarios, stats: { customers: customers.filter(c => c.status === "active" && !c.is_demo).length, reachable: customers.filter(c => c.status === "active" && !c.is_demo).length, campaigns: campaigns.length, scheduled: campaigns.filter(c => c.status === "scheduled").length, unread: messages.filter(m => m.direction === "inbound" && m.is_unread).length } };
