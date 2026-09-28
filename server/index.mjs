@@ -200,6 +200,9 @@ async function handleUpdate(update) {
     const item = scenarioMessage("test_invitation");
     await send(chatId, { text: item.message, link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: [[{ text: "Узнать о курсе", url: COURSE_URL }]] } }, "quiz_start");
     applyScenarioTags(telegramId, item);
+  } else if (/^\/start(?:\s+|=)livestream$/i.test(text)) {
+    record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "livestream_signup" });
+    tagCustomer(telegramId, "эфир2", "violet");
   } else if (/^\/start(?:\s+|=)vebinarspina$/i.test(text)) {
     record({ telegramId, telegramMessageId: message.message_id, direction: "inbound", text, scenario: "webinar_signup" });
     const item = scenarioMessage("webinar_confirmation");
