@@ -489,7 +489,7 @@ function CustomerPanel({ customer, tags, onClose, onSave }: { customer: Customer
 }
 
 function Composer({ tags, campaign, onClose, onSave, onTest }: { tags: Tag[]; campaign: Campaign | null; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void>; onTest: (payload: Record<string, unknown>) => Promise<void> }) {
-  const [title, setTitle] = useState(campaign?.title ?? ""); const [message, setMessage] = useState(campaign?.message ?? ""); const [audienceMode, setAudienceMode] = useState(campaign?.audience_mode ?? "all"); const [included, setIncluded] = useState<number[]>(campaignTagIds(campaign?.included_tag_ids)); const [excluded, setExcluded] = useState<number[]>(campaignTagIds(campaign?.excluded_tag_ids)); const [timing, setTiming] = useState(campaign ? "later" : "now"); const [scheduledAt, setScheduledAt] = useState(datetimeLocal(campaign?.scheduled_at ?? null)); const [busy, setBusy] = useState(false); const [testing, setTesting] = useState(false); const [testSent, setTestSent] = useState(false); const [photo, setPhoto] = useState<{ dataUrl: string; name: string } | null>(null); const [video, setVideo] = useState<{ dataUrl: string; name: string } | null>(null); const [removeMedia, setRemoveMedia] = useState(false); const [error, setError] = useState("");
+  const [title, setTitle] = useState(campaign?.title ?? ""); const [message, setMessage] = useState(campaign?.message ?? ""); const [audienceMode, setAudienceMode] = useState(campaign?.audience_mode ?? "all"); const [included, setIncluded] = useState<number[]>(campaignTagIds(campaign?.included_tag_ids)); const [excluded, setExcluded] = useState<number[]>(campaignTagIds(campaign?.excluded_tag_ids)); const [timing, setTiming] = useState(campaign ? "later" : "now"); const [scheduledAt, setScheduledAt] = useState(datetimeLocal(campaign?.scheduled_at ?? null)); const [busy, setBusy] = useState(false); const [testing, setTesting] = useState(false); const [testSent, setTestSent] = useState(false); const [photo, setPhoto] = useState<{ dataUrl: string; name: string } | null>(null); const [video, setVideo] = useState<{ dataUrl: string; name: string; width: number; height: number; duration: number } | null>(null); const [removeMedia, setRemoveMedia] = useState(false); const [error, setError] = useState("");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   function toggle(list: number[], setList: (ids: number[]) => void, id: number) { setList(list.includes(id) ? list.filter((item) => item !== id) : [...list, id]); }
   function insertMarkup(opening: string, closing: string, placeholder: string) {
@@ -534,10 +534,17 @@ function Composer({ tags, campaign, onClose, onSave, onTest }: { tags: Tag[]; ca
     if (!file) return;
     if (file.type !== "video/mp4") { setError("Можно прикрепить видео только в формате MP4"); return; }
     if (file.size > 50_000_000) { setError("Видео должно весить не больше 50 МБ"); return; }
-    const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === "string") { setVideo({ dataUrl: reader.result, name: file.name }); setPhoto(null); setRemoveMedia(false); setError(""); setTestSent(false); } };
-    reader.onerror = () => setError("Не удалось прочитать видео");
-    reader.readAsDataURL(file);
+    const objectUrl = URL.createObjectURL(file); const probe = document.createElement("video"); probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      const width = probe.videoWidth; const height = probe.videoHeight; const measuredDuration = Math.round(probe.duration); const duration = Number.isFinite(measuredDuration) ? Math.max(1, measuredDuration) : 1; URL.revokeObjectURL(objectUrl);
+      if (!width || !height) { setError("Не удалось определить формат видео"); return; }
+      const reader = new FileReader();
+      reader.onload = () => { if (typeof reader.result === "string") { setVideo({ dataUrl: reader.result, name: file.name, width, height, duration }); setPhoto(null); setRemoveMedia(false); setError(""); setTestSent(false); } };
+      reader.onerror = () => setError("Не удалось прочитать видео");
+      reader.readAsDataURL(file);
+    };
+    probe.onerror = () => { URL.revokeObjectURL(objectUrl); setError("Не удалось прочитать параметры видео"); };
+    probe.src = objectUrl;
   }
   function deleteMedia() { setPhoto(null); setVideo(null); setRemoveMedia(Boolean(campaign?.has_photo || campaign?.has_video)); setTestSent(false); }
   async function sendTest() {
