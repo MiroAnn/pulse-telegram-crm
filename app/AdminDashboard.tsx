@@ -84,12 +84,26 @@ type TrackingLink = {
   last_visit_at: string | null;
   created_at: string;
 };
+type NurtureMessage = {
+  id: number;
+  title: string;
+  message: string;
+  delay_minutes: number;
+  button_text: string | null;
+  button_url: string | null;
+  enabled: number;
+  sent_count: number;
+  pending_count: number;
+  created_at: string;
+  updated_at: string;
+};
 type Dashboard = {
   customers: Customer[];
   tags: Tag[];
   campaigns: Campaign[];
   messages: ChatMessage[];
   scenarios: Scenario[];
+  nurtureMessages: NurtureMessage[];
   trackingLinks: TrackingLink[];
   stats: { customers: number; reachable: number; campaigns: number; scheduled: number; unread: number };
 };
@@ -100,6 +114,7 @@ const emptyDashboard: Dashboard = {
   campaigns: [],
   messages: [],
   scenarios: [],
+  nurtureMessages: [],
   trackingLinks: [],
   stats: { customers: 0, reachable: 0, campaigns: 0, scheduled: 0, unread: 0 },
 };
@@ -159,7 +174,7 @@ function datetimeLocal(value: string | null) {
 export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized }: { apiBase?: string; authPassword?: string; onUnauthorized?: () => void } = {}) {
   const [data, setData] = useState<Dashboard>(emptyDashboard);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"customers" | "chats" | "segments" | "scenarios" | "campaigns" | "traffic">("customers");
+  const [view, setView] = useState<"customers" | "chats" | "segments" | "scenarios" | "campaigns" | "traffic" | "nurture">("customers");
   const [query, setQuery] = useState("");
   const [tagFilter, setTagFilter] = useState<number | "all">("all");
   const [selected, setSelected] = useState<Customer | null>(null);
@@ -179,7 +194,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
         if (response.status === 401) { onUnauthorized?.(); throw new Error("Неверный пароль"); }
         if (!response.ok) throw new Error("Не удалось загрузить данные");
         const result = await response.json() as Dashboard;
-        if (active) setData({ ...emptyDashboard, ...result, trackingLinks: result.trackingLinks ?? [] });
+        if (active) setData({ ...emptyDashboard, ...result, nurtureMessages: result.nurtureMessages ?? [], trackingLinks: result.trackingLinks ?? [] });
       } catch (error) {
         if (active) setNotice(error instanceof Error ? error.message : "Ошибка загрузки");
       } finally {
@@ -200,7 +215,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
     if (response.status === 401) onUnauthorized?.();
     const result = (await response.json()) as Dashboard & { error?: string };
     if (!response.ok) throw new Error(result.error ?? "Не удалось сохранить");
-    setData({ ...emptyDashboard, ...result, trackingLinks: result.trackingLinks ?? [] });
+    setData({ ...emptyDashboard, ...result, nurtureMessages: result.nurtureMessages ?? [], trackingLinks: result.trackingLinks ?? [] });
     if (selected) {
       setSelected(result.customers.find((item) => item.id === selected.id) ?? null);
     }
@@ -238,6 +253,9 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
           <button className={view === "traffic" ? "nav-item active" : "nav-item"} onClick={() => setView("traffic")}>
             <span className="nav-icon">⌁</span> Ссылки <b>{data.trackingLinks.reduce((sum, link) => sum + link.unique_visitors, 0) || ""}</b>
           </button>
+          {isVoprosy && <button className={view === "nurture" ? "nav-item active" : "nav-item"} onClick={() => setView("nurture")}>
+            <span className="nav-icon">↻</span> Догревы <b>{data.nurtureMessages.filter((item) => item.enabled).length || ""}</b>
+          </button>}
           {!isVoprosy && <button className={view === "scenarios" ? "nav-item active" : "nav-item"} onClick={() => setView("scenarios")}>
             <span className="nav-icon">⌘</span> Сценарии
           </button>}
@@ -301,6 +319,7 @@ export function AdminDashboard({ apiBase = "", authPassword = "", onUnauthorized
 
           {view === "segments" && <Segments data={data} action={action} />}
           {view === "traffic" && <Traffic data={data} action={action} />}
+          {view === "nurture" && <Nurtures data={data} action={action} />}
           {view === "scenarios" && <Scenarios data={data} action={action} />}
           {view === "campaigns" && <Campaigns data={data} onCompose={() => { setEditingCampaign(null); setComposer(true); }} onEdit={(campaign) => { setEditingCampaign(campaign); setComposer(true); }} action={action} />}
           {view === "chats" && <Chats data={data} query={query} selectedChat={selectedChat} onSelect={async (telegramId) => { setSelectedChat(telegramId); await action({ action: "mark-chat-read", telegramId }); }} onSend={async (telegramId, message) => { await action({ action: "send-chat-message", telegramId, message }); }} />}
@@ -477,6 +496,60 @@ function Traffic({ data, action }: { data: Dashboard; action: (payload: Record<s
       </div>
     </div>
   </>;
+}
+
+function delayLabel(minutes: number) {
+  if (minutes % 1440 === 0) return `${minutes / 1440} дн.`;
+  if (minutes % 60 === 0) return `${minutes / 60} ч.`;
+  return `${minutes} мин.`;
+}
+
+function Nurtures({ data, action }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
+  const [editor, setEditor] = useState<NurtureMessage | "new" | null>(null);
+  async function remove(item: NurtureMessage) {
+    if (!window.confirm(`Удалить сообщение «${item.title}» и всю историю его отправок?`)) return;
+    await action({ action: "delete-nurture-message", messageId: item.id });
+  }
+  return <>
+    <div className="page-heading"><div><span className="eyebrow">Автоматическая цепочка</span><h1>Догревы</h1><p>Интервал считается от первого запуска сценария /start. После покупки оставшиеся сообщения автоматически отменяются.</p></div><button className="primary-button" onClick={() => setEditor("new")}>＋ Добавить сообщение</button></div>
+    <div className="nurture-summary"><span className="metric-icon purple">↻</span><div><strong>{data.nurtureMessages.filter((item) => item.enabled).length} активных сообщений</strong><p>Новые участники получают включённые сообщения по порядку времени. Выключение сообщения отменяет его ожидающие отправки.</p></div></div>
+    <div className="nurture-list">
+      {data.nurtureMessages.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↻</span><h3>Цепочка пока пуста</h3><p>Добавьте первое сообщение и укажите, через сколько времени после /start его отправить.</p><button className="primary-button" onClick={() => setEditor("new")}>Добавить сообщение</button></div> : data.nurtureMessages.map((item, index) => <article className={`nurture-card${item.enabled ? "" : " disabled"}`} key={item.id}>
+        <div className="nurture-step"><span>{index + 1}</span><small>через {delayLabel(item.delay_minutes)}</small></div>
+        <div className="nurture-copy"><div><strong>{item.title}</strong><i className={item.enabled ? "nurture-status active" : "nurture-status"}>{item.enabled ? "Включено" : "Выключено"}</i></div><p>{scenarioPreview(item.message)}</p>{item.button_text && <small>Кнопка: «{item.button_text}»</small>}</div>
+        <div className="nurture-counts"><span><strong>{item.pending_count}</strong><small>ожидают</small></span><span><strong>{item.sent_count}</strong><small>отправлено</small></span></div>
+        <div className="nurture-actions"><button className="edit-button" onClick={() => setEditor(item)}>Редактировать</button><button className="secondary-button" onClick={() => void action({ action: "toggle-nurture-message", messageId: item.id, enabled: !item.enabled })}>{item.enabled ? "Выключить" : "Включить"}</button><button className="delete-tag-button" onClick={() => void remove(item)}>Удалить</button></div>
+      </article>)}
+    </div>
+    {editor && <NurtureEditor item={editor === "new" ? null : editor} onClose={() => setEditor(null)} onSave={async (payload) => { await action({ action: editor === "new" ? "create-nurture-message" : "update-nurture-message", messageId: editor === "new" ? undefined : editor.id, ...payload }); setEditor(null); }} />}
+  </>;
+}
+
+function NurtureEditor({ item, onClose, onSave }: { item: NurtureMessage | null; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void> }) {
+  const initialUnit = item && item.delay_minutes % 1440 === 0 ? "days" : item && item.delay_minutes % 60 === 0 ? "hours" : "minutes";
+  const initialValue = item ? item.delay_minutes / (initialUnit === "days" ? 1440 : initialUnit === "hours" ? 60 : 1) : 1;
+  const [title, setTitle] = useState(item?.title ?? "");
+  const [message, setMessage] = useState(item?.message ?? "");
+  const [delayValue, setDelayValue] = useState(String(initialValue));
+  const [delayUnit, setDelayUnit] = useState(initialUnit);
+  const [buttonText, setButtonText] = useState(item?.button_text ?? "");
+  const [buttonUrl, setButtonUrl] = useState(item?.button_url ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError("");
+    const multiplier = delayUnit === "days" ? 1440 : delayUnit === "hours" ? 60 : 1;
+    try { await onSave({ title, message, delayMinutes: Math.round(Number(delayValue) * multiplier), buttonText, buttonUrl }); }
+    catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить сообщение"); setBusy(false); }
+  }
+  return <div className="overlay composer-overlay"><form className="composer nurture-editor" onSubmit={submit}><header><div><span className="eyebrow">Шаг цепочки</span><h2>{item ? "Редактировать догрев" : "Новое сообщение"}</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body">
+    <label className="field"><span>Название внутри админки</span><input required maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, напоминание через день"/></label>
+    <fieldset><legend>Когда отправить после /start</legend><div className="delay-row"><input type="number" required min="1" step="1" value={delayValue} onChange={(event) => setDelayValue(event.target.value)}/><select value={delayUnit} onChange={(event) => setDelayUnit(event.target.value)}><option value="minutes">минут</option><option value="hours">часов</option><option value="days">дней</option></select></div></fieldset>
+    <label className="field message-field"><span>Текст сообщения</span><textarea required rows={8} maxLength={4096} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Текст, который получит человек…"/><small>{message.length} / 4096</small></label>
+    <div className="optional-button-fields"><label className="field"><span>Текст кнопки — необязательно</span><input value={buttonText} onChange={(event) => setButtonText(event.target.value)} placeholder="Оплатить 5900 руб"/></label><label className="field"><span>Ссылка кнопки</span><input type="url" value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://…"/></label></div>
+    <p className="editor-hint">Поддерживается HTML Telegram: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;a href=&quot;https://…&quot;&gt;ссылка&lt;/a&gt;. Сообщение не отправится тем, кто уже купил.</p>
+    {error && <p className="form-error">{error}</p>}
+  </div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></footer></form></div>;
 }
 
 function Campaigns({ data, onCompose, onEdit, action }: { data: Dashboard; onCompose: () => void; onEdit: (campaign: Campaign) => void; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
