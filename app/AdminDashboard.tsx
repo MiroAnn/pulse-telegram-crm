@@ -36,6 +36,7 @@ type Campaign = {
   sent_count: number;
   failed_count: number;
   has_photo: boolean;
+  has_video: boolean;
   created_at: string;
 };
 type ChatMessage = {
@@ -478,7 +479,7 @@ function Traffic({ data, action }: { data: Dashboard; action: (payload: Record<s
 function Campaigns({ data, onCompose, onEdit, action }: { data: Dashboard; onCompose: () => void; onEdit: (campaign: Campaign) => void; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
   return <>
     <div className="page-heading"><div><span className="eyebrow">Коммуникации</span><h1>Рассылки</h1><p>Моментальные и отложенные сообщения вашей аудитории.</p></div><button className="primary-button desktop-only" onClick={onCompose}>＋ Новая рассылка</button></div>
-    <div className="campaign-list">{data.campaigns.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↗</span><h3>Здесь появятся рассылки</h3><p>Создайте первое сообщение и выберите аудиторию.</p><button className="primary-button" onClick={onCompose}>Создать рассылку</button></div> : data.campaigns.map((campaign) => <article className="campaign-card" key={campaign.id}><div className={`campaign-status status-${campaign.status}`}>{statusLabels[campaign.status] ?? campaign.status}</div><div className="campaign-main"><strong>{campaign.title}</strong><p>{campaign.message}</p>{campaign.has_photo && <span className="campaign-photo-label">📷 Фото прикреплено</span>}<small>{campaign.status === "scheduled" ? `Отправка ${niceDate(campaign.scheduled_at)}` : `Создана ${niceDate(campaign.created_at)}`}</small></div><div className="campaign-stats"><strong>{campaign.sent_count}</strong><small>отправлено</small>{campaign.failed_count > 0 && <em>{campaign.failed_count} ошибок</em>}</div>{campaign.status === "scheduled" && <div className="campaign-actions"><button className="edit-button" onClick={() => onEdit(campaign)}>Редактировать</button><button className="more-button" aria-label="Отменить рассылку" title="Отменить рассылку" onClick={() => void action({ action: "cancel-campaign", campaignId: campaign.id })}>×</button></div>}</article>)}</div>
+    <div className="campaign-list">{data.campaigns.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↗</span><h3>Здесь появятся рассылки</h3><p>Создайте первое сообщение и выберите аудиторию.</p><button className="primary-button" onClick={onCompose}>Создать рассылку</button></div> : data.campaigns.map((campaign) => <article className="campaign-card" key={campaign.id}><div className={`campaign-status status-${campaign.status}`}>{statusLabels[campaign.status] ?? campaign.status}</div><div className="campaign-main"><strong>{campaign.title}</strong><p>{campaign.message}</p>{campaign.has_video ? <span className="campaign-photo-label">🎬 Видео прикреплено</span> : campaign.has_photo && <span className="campaign-photo-label">📷 Фото прикреплено</span>}<small>{campaign.status === "scheduled" ? `Отправка ${niceDate(campaign.scheduled_at)}` : `Создана ${niceDate(campaign.created_at)}`}</small></div><div className="campaign-stats"><strong>{campaign.sent_count}</strong><small>отправлено</small>{campaign.failed_count > 0 && <em>{campaign.failed_count} ошибок</em>}</div>{campaign.status === "scheduled" && <div className="campaign-actions"><button className="edit-button" onClick={() => onEdit(campaign)}>Редактировать</button><button className="more-button" aria-label="Отменить рассылку" title="Отменить рассылку" onClick={() => void action({ action: "cancel-campaign", campaignId: campaign.id })}>×</button></div>}</article>)}</div>
   </>;
 }
 
@@ -488,7 +489,7 @@ function CustomerPanel({ customer, tags, onClose, onSave }: { customer: Customer
 }
 
 function Composer({ tags, campaign, onClose, onSave, onTest }: { tags: Tag[]; campaign: Campaign | null; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void>; onTest: (payload: Record<string, unknown>) => Promise<void> }) {
-  const [title, setTitle] = useState(campaign?.title ?? ""); const [message, setMessage] = useState(campaign?.message ?? ""); const [audienceMode, setAudienceMode] = useState(campaign?.audience_mode ?? "all"); const [included, setIncluded] = useState<number[]>(campaignTagIds(campaign?.included_tag_ids)); const [excluded, setExcluded] = useState<number[]>(campaignTagIds(campaign?.excluded_tag_ids)); const [timing, setTiming] = useState(campaign ? "later" : "now"); const [scheduledAt, setScheduledAt] = useState(datetimeLocal(campaign?.scheduled_at ?? null)); const [busy, setBusy] = useState(false); const [testing, setTesting] = useState(false); const [testSent, setTestSent] = useState(false); const [photo, setPhoto] = useState<{ dataUrl: string; name: string } | null>(null); const [removePhoto, setRemovePhoto] = useState(false); const [error, setError] = useState("");
+  const [title, setTitle] = useState(campaign?.title ?? ""); const [message, setMessage] = useState(campaign?.message ?? ""); const [audienceMode, setAudienceMode] = useState(campaign?.audience_mode ?? "all"); const [included, setIncluded] = useState<number[]>(campaignTagIds(campaign?.included_tag_ids)); const [excluded, setExcluded] = useState<number[]>(campaignTagIds(campaign?.excluded_tag_ids)); const [timing, setTiming] = useState(campaign ? "later" : "now"); const [scheduledAt, setScheduledAt] = useState(datetimeLocal(campaign?.scheduled_at ?? null)); const [busy, setBusy] = useState(false); const [testing, setTesting] = useState(false); const [testSent, setTestSent] = useState(false); const [photo, setPhoto] = useState<{ dataUrl: string; name: string } | null>(null); const [video, setVideo] = useState<{ dataUrl: string; name: string } | null>(null); const [removeMedia, setRemoveMedia] = useState(false); const [error, setError] = useState("");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   function toggle(list: number[], setList: (ids: number[]) => void, id: number) { setList(list.includes(id) ? list.filter((item) => item !== id) : [...list, id]); }
   function insertMarkup(opening: string, closing: string, placeholder: string) {
@@ -523,30 +524,45 @@ function Composer({ tags, campaign, onClose, onSave, onTest }: { tags: Tag[]; ca
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError("Можно прикрепить фото в формате JPEG, PNG или WebP"); return; }
     if (file.size > 8_000_000) { setError("Фото должно весить не больше 8 МБ"); return; }
     const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === "string") { setPhoto({ dataUrl: reader.result, name: file.name }); setRemovePhoto(false); setError(""); setTestSent(false); } };
+    reader.onload = () => { if (typeof reader.result === "string") { setPhoto({ dataUrl: reader.result, name: file.name }); setVideo(null); setRemoveMedia(false); setError(""); setTestSent(false); } };
     reader.onerror = () => setError("Не удалось прочитать фото");
     reader.readAsDataURL(file);
   }
-  function deletePhoto() { setPhoto(null); setRemovePhoto(Boolean(campaign?.has_photo)); setTestSent(false); }
+  function selectVideo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.type !== "video/mp4") { setError("Можно прикрепить видео только в формате MP4"); return; }
+    if (file.size > 50_000_000) { setError("Видео должно весить не больше 50 МБ"); return; }
+    const reader = new FileReader();
+    reader.onload = () => { if (typeof reader.result === "string") { setVideo({ dataUrl: reader.result, name: file.name }); setPhoto(null); setRemoveMedia(false); setError(""); setTestSent(false); } };
+    reader.onerror = () => setError("Не удалось прочитать видео");
+    reader.readAsDataURL(file);
+  }
+  function deleteMedia() { setPhoto(null); setVideo(null); setRemoveMedia(Boolean(campaign?.has_photo || campaign?.has_video)); setTestSent(false); }
   async function sendTest() {
     if (!message.trim()) { setError("Введите текст рассылки"); return; }
     setTesting(true); setTestSent(false); setError("");
-    try { await onTest({ message, photo, removePhoto }); setTestSent(true); }
+    try { await onTest({ message, photo, video, removeMedia }); setTestSent(true); }
     catch (err) { setError(err instanceof Error ? err.message : "Не удалось отправить тест"); }
     finally { setTesting(false); }
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setTestSent(false); setError("");
-    try { await onSave({ title, message, photo, removePhoto, audienceMode, includedTagIds: included, excludedTagIds: excluded, sendNow: timing === "now", scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null }); }
+    try { await onSave({ title, message, photo, video, removeMedia, audienceMode, includedTagIds: included, excludedTagIds: excluded, sendNow: timing === "now", scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null }); }
     catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить рассылку"); setBusy(false); }
   }
-  const hasPhoto = Boolean(photo) || Boolean(campaign?.has_photo && !removePhoto);
+  const existingMedia = !removeMedia && (campaign?.has_video ? "video" : campaign?.has_photo ? "photo" : null); const mediaType = video ? "video" : photo ? "photo" : existingMedia; const hasMedia = Boolean(mediaType);
   return <div className="overlay composer-overlay"><form className="composer" onSubmit={submit}>
     <header><div><span className="eyebrow">{campaign ? "Запланированное сообщение" : "Новое сообщение"}</span><h2>{campaign ? "Редактировать рассылку" : "Создать рассылку"}</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header>
     <div className="composer-body">
       <label className="field"><span>Название рассылки</span><input required value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, напоминание о вебинаре" /></label>
       <div className="field message-field"><span>Сообщение</span><div className="format-toolbar"><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertMarkup("<b>", "</b>", "жирный текст")}><b>B</b> Жирный</button><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={insertLink}>🔗 Ссылка</button></div><textarea ref={messageRef} aria-label="Сообщение рассылки" required rows={7} value={message} onChange={(event) => { setMessage(event.target.value); setTestSent(false); }} placeholder="Напишите текст, который получат клиенты…"/><small>{message.length} символов</small></div>
-      <div className="photo-upload"><span>Фото <small>(необязательно)</small></span>{photo && <div className="photo-preview" role="img" aria-label="Предпросмотр вложения" style={{ backgroundImage: `url(${photo.dataUrl})` }}/>}<div className="photo-upload-copy">{hasPhoto ? <><strong>{photo?.name ?? "Фото прикреплено"}</strong><small>Фото будет отправлено вместе с текстом</small></> : <><strong>Добавьте фото к рассылке</strong><small>JPEG, PNG или WebP, до 8 МБ</small></>}<div><label className="photo-picker">📷 {hasPhoto ? "Заменить фото" : "Прикрепить фото"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto}/></label>{hasPhoto && <button type="button" className="remove-photo" onClick={deletePhoto}>Удалить</button>}</div></div></div>
+      <div className="photo-upload"><span>Медиа <small>(необязательно)</small></span>{photo && <div className="photo-preview" role="img" aria-label="Предпросмотр фотографии" style={{ backgroundImage: `url(${photo.dataUrl})` }}/>} {video && <>
+        {/* Видео используется только для локального предпросмотра выбранного файла; субтитры добавляются автором в сам ролик. */}
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <video className="video-preview" src={video.dataUrl} controls preload="metadata"/>
+      </>}<div className="photo-upload-copy">{hasMedia ? <><strong>{video?.name ?? photo?.name ?? (mediaType === "video" ? "Видео прикреплено" : "Фото прикреплено")}</strong><small>{mediaType === "video" ? "MP4 до 50 МБ будет отправлено вместе с текстом" : "Фото будет отправлено вместе с текстом"}</small></> : <><strong>Добавьте фото или видео</strong><small>Фото до 8 МБ · видео MP4 до 50 МБ</small></>}<div><label className="photo-picker">📷 Фото<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto}/></label><label className="photo-picker">🎬 Видео<input type="file" accept="video/mp4,.mp4" onChange={selectVideo}/></label>{hasMedia && <button type="button" className="remove-photo" onClick={deleteMedia}>Удалить</button>}</div></div></div>
       <fieldset><legend>Кому отправить</legend><div className="choice-grid"><label className={audienceMode === "all" ? "choice active" : "choice"}><input type="radio" name="audience" checked={audienceMode === "all"} onChange={() => setAudienceMode("all")}/><strong>Вся база</strong><small>Все активные клиенты</small></label><label className={audienceMode === "tags" ? "choice active" : "choice"}><input type="radio" name="audience" checked={audienceMode === "tags"} onChange={() => setAudienceMode("tags")}/><strong>По тегам</strong><small>Только выбранные группы</small></label></div>{audienceMode === "tags" && <div className="tag-choice"><span>Включить теги</span>{tags.map((tag) => <button type="button" className={included.includes(tag.id) ? `tag tag-${tag.color} selected` : "tag"} key={tag.id} onClick={() => toggle(included, setIncluded, tag.id)}>{tag.name}</button>)}</div>}<div className="tag-choice"><span>Исключить теги <small>(необязательно)</small></span>{tags.length ? tags.map((tag) => <button type="button" className={excluded.includes(tag.id) ? "tag excluded selected" : "tag"} key={tag.id} onClick={() => toggle(excluded, setExcluded, tag.id)}>{tag.name}</button>) : <small>Тегов пока нет</small>}</div></fieldset>
       <fieldset><legend>Когда отправить</legend><div className="timing-row"><label><input type="radio" name="timing" checked={timing === "now"} onChange={() => setTiming("now")}/> Сразу</label><label><input type="radio" name="timing" checked={timing === "later"} onChange={() => setTiming("later")}/> По расписанию</label></div>{timing === "later" && <input className="date-input" type="datetime-local" required value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} />}</fieldset>
       {testSent && <p className="form-success">Тест отправлен пользователю @ann_miro</p>}{error && <p className="form-error">{error}</p>}

@@ -21,7 +21,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id TEXT NOT NULL UNIQUE, username TEXT, first_name TEXT NOT NULL, last_name TEXT, phone TEXT, email TEXT, avatar_url TEXT, status TEXT NOT NULL DEFAULT 'active', is_demo INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT 'violet');
 CREATE TABLE IF NOT EXISTS customer_tags (customer_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(customer_id, tag_id));
-CREATE TABLE IF NOT EXISTS campaigns (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, message TEXT NOT NULL, photo_path TEXT, audience_mode TEXT NOT NULL DEFAULT 'all', excluded_tag_ids TEXT NOT NULL DEFAULT '[]', included_tag_ids TEXT NOT NULL DEFAULT '[]', scheduled_at TEXT, status TEXT NOT NULL DEFAULT 'draft', sent_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS campaigns (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, message TEXT NOT NULL, photo_path TEXT, video_path TEXT, audience_mode TEXT NOT NULL DEFAULT 'all', excluded_tag_ids TEXT NOT NULL DEFAULT '[]', included_tag_ids TEXT NOT NULL DEFAULT '[]', scheduled_at TEXT, status TEXT NOT NULL DEFAULT 'draft', sent_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS deliveries (id INTEGER PRIMARY KEY AUTOINCREMENT, campaign_id INTEGER NOT NULL, customer_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', error TEXT, sent_at TEXT, UNIQUE(campaign_id, customer_id));
 CREATE TABLE IF NOT EXISTS quiz_sessions (telegram_id TEXT PRIMARY KEY, answers_json TEXT NOT NULL DEFAULT '[]', concerns_json TEXT NOT NULL DEFAULT '[]', current_step INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'active', result TEXT, details TEXT, started_at TEXT NOT NULL, completed_at TEXT, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id TEXT NOT NULL, telegram_message_id INTEGER, direction TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', text TEXT NOT NULL, scenario TEXT NOT NULL DEFAULT 'freeform', is_unread INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(telegram_id, telegram_message_id, direction));
@@ -40,6 +40,7 @@ PRAGMA optimize;
 `);
 if (!db.prepare("PRAGMA table_info(quiz_sessions)").all().some(column => column.name === "concerns_json")) db.exec("ALTER TABLE quiz_sessions ADD COLUMN concerns_json TEXT NOT NULL DEFAULT '[]'");
 if (!db.prepare("PRAGMA table_info(campaigns)").all().some(column => column.name === "photo_path")) db.exec("ALTER TABLE campaigns ADD COLUMN photo_path TEXT");
+if (!db.prepare("PRAGMA table_info(campaigns)").all().some(column => column.name === "video_path")) db.exec("ALTER TABLE campaigns ADD COLUMN video_path TEXT");
 
 const COURSE_URL = "https://course.dariakavunenko.ru/?utm_source=telegram";
 const CHECKLIST_URL = "https://www.dropbox.com/scl/fo/xf7wvh261mcom27njhfid/ABLZ-Uui-dW3t19TsIxnNIA?rlkey=y3a0ppbdymj3xbxp8u7qc5q6s&dl=0";
@@ -129,7 +130,7 @@ function respond(req, res, status, data, extra = {}) {
 }
 async function body(req) {
   const chunks = []; let size = 0;
-  for await (const chunk of req) { size += chunk.length; if (size > 15_000_000) throw new Error("Request too large"); chunks.push(chunk); }
+  for await (const chunk of req) { size += chunk.length; if (size > 70_000_000) throw new Error("Файл слишком большой"); chunks.push(chunk); }
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
 }
 function signAvatar(path) { return createHmac("sha256", adminPassword).update(path).digest("hex"); }
@@ -166,10 +167,21 @@ function saveCampaignPhoto(input) {
 function removeCampaignPhoto(path) {
   if (path && path.startsWith(`${campaignMediaDir}/`) && existsSync(path)) unlinkSync(path);
 }
-async function telegramPhoto(chatId, photoPath, caption = "") {
-  const extension = photoPath.split(".").pop()?.toLowerCase() || "jpg";
-  const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
-  const bytes = readFileSync(photoPath);
+function saveCampaignVideo(input) {
+  if (!input || typeof input !== "object") return null;
+  const dataUrl = String(input.dataUrl || "");
+  const match = dataUrl.match(/^data:(video\/mp4);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new Error("Добавьте видео в формате MP4");
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > 50_000_000) throw new Error("Видео должно быть не больше 50 МБ");
+  const path = join(campaignMediaDir, `${randomUUID()}.mp4`);
+  writeFileSync(path, bytes, { flag: "wx" });
+  return path;
+}
+async function telegramMedia(chatId, method, field, mediaPath, caption = "") {
+  const extension = mediaPath.split(".").pop()?.toLowerCase() || (field === "video" ? "mp4" : "jpg");
+  const contentType = field === "video" ? "video/mp4" : extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
+  const bytes = readFileSync(mediaPath);
   const retryableCodes = new Set(["UND_ERR_CONNECT_TIMEOUT", "ETIMEDOUT", "ENETUNREACH", "EAI_AGAIN"]);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -177,8 +189,9 @@ async function telegramPhoto(chatId, photoPath, caption = "") {
       form.set("chat_id", String(chatId));
       form.set("parse_mode", "HTML");
       if (caption) form.set("caption", caption);
-      form.set("photo", new Blob([bytes], { type: contentType }), `campaign.${extension}`);
-      const response = await fetch(`${telegramApiBase}/bot${token}/sendPhoto`, { method: "POST", body: form });
+      if (field === "video") form.set("supports_streaming", "true");
+      form.set(field, new Blob([bytes], { type: contentType }), `campaign.${extension}`);
+      const response = await fetch(`${telegramApiBase}/bot${token}/${method}`, { method: "POST", body: form });
       const result = await response.json();
       if (!result.ok) throw new Error(result.description || `Telegram ${response.status}`);
       return result.result;
@@ -190,10 +203,12 @@ async function telegramPhoto(chatId, photoPath, caption = "") {
   }
   throw new Error("Telegram unavailable");
 }
-async function sendCampaignContent(chatId, message, photoPath) {
-  if (!photoPath) return telegram("sendMessage", { chat_id: chatId, text: message, parse_mode: "HTML" });
-  if (message.length <= 1024) return telegramPhoto(chatId, photoPath, message);
-  await telegramPhoto(chatId, photoPath);
+async function sendCampaignContent(chatId, message, photoPath, videoPath) {
+  const mediaPath = videoPath || photoPath;
+  if (!mediaPath) return telegram("sendMessage", { chat_id: chatId, text: message, parse_mode: "HTML" });
+  const method = videoPath ? "sendVideo" : "sendPhoto"; const field = videoPath ? "video" : "photo";
+  if (message.length <= 1024) return telegramMedia(chatId, method, field, mediaPath, message);
+  await telegramMedia(chatId, method, field, mediaPath);
   return telegram("sendMessage", { chat_id: chatId, text: message, parse_mode: "HTML" });
 }
 function record({ telegramId, telegramMessageId = null, direction, kind = "text", text, scenario, unread = false }) {
@@ -293,7 +308,7 @@ function dashboard() {
   const tagsById = new Map(tags.map(t => [Number(t.id), t])); const grouped = new Map();
   for (const link of links) { const list = grouped.get(Number(link.customer_id)) || []; const tag = tagsById.get(Number(link.tag_id)); if (tag) list.push(tag); grouped.set(Number(link.customer_id), list); }
   const customers = db.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC").all().map(c => ({ ...c, avatar_url: publicAvatar(c.avatar_url), tags: grouped.get(Number(c.id)) || [], quiz: quizzes.get(String(c.telegram_id)) || null }));
-  const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50").all().map(({ photo_path: photoPath, ...campaign }) => ({ ...campaign, has_photo: Boolean(photoPath) }));
+  const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50").all().map(({ photo_path: photoPath, video_path: videoPath, ...campaign }) => ({ ...campaign, has_photo: Boolean(photoPath), has_video: Boolean(videoPath) }));
   const messages = db.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC").all();
   const scenarioTags = db.prepare("SELECT smt.message_key,t.id,t.name,t.color FROM scenario_message_tags smt JOIN tags t ON t.id=smt.tag_id ORDER BY t.name").all();
   const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all().map(message => ({ ...message, tags: scenarioTags.filter(tag => tag.message_key === message.message_key).map(tag => ({ id: tag.id, name: tag.name, color: tag.color })) }));
@@ -310,11 +325,11 @@ async function action(input) {
   } else if (input.action === "set-customer-tags") {
     const customerId = Number(input.customerId); db.prepare("DELETE FROM customer_tags WHERE customer_id=?").run(customerId); for (const tagId of ids(input.tagIds)) db.prepare("INSERT OR IGNORE INTO customer_tags (customer_id,tag_id) VALUES (?,?)").run(customerId, tagId);
   } else if (input.action === "create-campaign") {
-    const title = String(input.title || "").trim(); const message = String(input.message || "").trim(); if (!title || !message) throw new Error("Заполните название и текст"); const scheduledAt = input.sendNow ? timestamp : String(input.scheduledAt || ""); if (!scheduledAt) throw new Error("Выберите время отправки"); const photoPath = saveCampaignPhoto(input.photo); try { db.prepare("INSERT INTO campaigns (title,message,photo_path,audience_mode,included_tag_ids,excluded_tag_ids,scheduled_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'scheduled',?,?)").run(title, message, photoPath, String(input.audienceMode || "all"), JSON.stringify(ids(input.includedTagIds)), JSON.stringify(ids(input.excludedTagIds)), scheduledAt, timestamp, timestamp); } catch (error) { removeCampaignPhoto(photoPath); throw error; }
+    const title = String(input.title || "").trim(); const message = String(input.message || "").trim(); if (!title || !message) throw new Error("Заполните название и текст"); if (input.photo && input.video) throw new Error("К рассылке можно прикрепить одно фото или одно видео"); const scheduledAt = input.sendNow ? timestamp : String(input.scheduledAt || ""); if (!scheduledAt) throw new Error("Выберите время отправки"); const photoPath = saveCampaignPhoto(input.photo); const videoPath = saveCampaignVideo(input.video); try { db.prepare("INSERT INTO campaigns (title,message,photo_path,video_path,audience_mode,included_tag_ids,excluded_tag_ids,scheduled_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?, 'scheduled',?,?)").run(title, message, photoPath, videoPath, String(input.audienceMode || "all"), JSON.stringify(ids(input.includedTagIds)), JSON.stringify(ids(input.excludedTagIds)), scheduledAt, timestamp, timestamp); } catch (error) { removeCampaignPhoto(photoPath); removeCampaignPhoto(videoPath); throw error; }
   } else if (input.action === "update-campaign") {
-    const campaignId = Number(input.campaignId); const campaign = db.prepare("SELECT status,photo_path FROM campaigns WHERE id=?").get(campaignId); if (!campaign) throw new Error("Рассылка не найдена"); if (campaign.status !== "scheduled") throw new Error("Можно редактировать только запланированную рассылку"); const title = String(input.title || "").trim(); const message = String(input.message || "").trim(); if (!title || !message) throw new Error("Заполните название и текст"); const scheduledAt = input.sendNow ? timestamp : String(input.scheduledAt || ""); if (!scheduledAt) throw new Error("Выберите время отправки"); const uploadedPhoto = saveCampaignPhoto(input.photo); const nextPhoto = uploadedPhoto || (input.removePhoto ? null : campaign.photo_path); try { const result = db.prepare("UPDATE campaigns SET title=?,message=?,photo_path=?,audience_mode=?,included_tag_ids=?,excluded_tag_ids=?,scheduled_at=?,updated_at=? WHERE id=? AND status='scheduled'").run(title, message, nextPhoto, String(input.audienceMode || "all"), JSON.stringify(ids(input.includedTagIds)), JSON.stringify(ids(input.excludedTagIds)), scheduledAt, timestamp, campaignId); if (!result.changes) throw new Error("Рассылка уже отправляется и больше не может быть изменена"); } catch (error) { removeCampaignPhoto(uploadedPhoto); throw error; } if (campaign.photo_path && campaign.photo_path !== nextPhoto) removeCampaignPhoto(campaign.photo_path);
+    const campaignId = Number(input.campaignId); const campaign = db.prepare("SELECT status,photo_path,video_path FROM campaigns WHERE id=?").get(campaignId); if (!campaign) throw new Error("Рассылка не найдена"); if (campaign.status !== "scheduled") throw new Error("Можно редактировать только запланированную рассылку"); const title = String(input.title || "").trim(); const message = String(input.message || "").trim(); if (!title || !message) throw new Error("Заполните название и текст"); if (input.photo && input.video) throw new Error("К рассылке можно прикрепить одно фото или одно видео"); const scheduledAt = input.sendNow ? timestamp : String(input.scheduledAt || ""); if (!scheduledAt) throw new Error("Выберите время отправки"); const uploadedPhoto = saveCampaignPhoto(input.photo); const uploadedVideo = saveCampaignVideo(input.video); const removeMedia = Boolean(input.removeMedia || input.removePhoto); const replacingMedia = Boolean(uploadedPhoto || uploadedVideo || removeMedia); const nextPhoto = replacingMedia ? uploadedPhoto : campaign.photo_path; const nextVideo = replacingMedia ? uploadedVideo : campaign.video_path; try { const result = db.prepare("UPDATE campaigns SET title=?,message=?,photo_path=?,video_path=?,audience_mode=?,included_tag_ids=?,excluded_tag_ids=?,scheduled_at=?,updated_at=? WHERE id=? AND status='scheduled'").run(title, message, nextPhoto, nextVideo, String(input.audienceMode || "all"), JSON.stringify(ids(input.includedTagIds)), JSON.stringify(ids(input.excludedTagIds)), scheduledAt, timestamp, campaignId); if (!result.changes) throw new Error("Рассылка уже отправляется и больше не может быть изменена"); } catch (error) { removeCampaignPhoto(uploadedPhoto); removeCampaignPhoto(uploadedVideo); throw error; } if (campaign.photo_path && campaign.photo_path !== nextPhoto) removeCampaignPhoto(campaign.photo_path); if (campaign.video_path && campaign.video_path !== nextVideo) removeCampaignPhoto(campaign.video_path);
   } else if (input.action === "test-campaign") {
-    const message = String(input.message || "").trim(); if (!message) throw new Error("Введите текст рассылки"); const recipient = db.prepare("SELECT telegram_id FROM customers WHERE lower(username)='ann_miro' AND is_demo=0 LIMIT 1").get(); if (!recipient) throw new Error("Пользователь ann_miro не найден в базе бота"); const campaign = input.campaignId ? db.prepare("SELECT photo_path FROM campaigns WHERE id=?").get(Number(input.campaignId)) : null; const uploadedPhoto = saveCampaignPhoto(input.photo); const photoPath = uploadedPhoto || (input.removePhoto ? null : campaign?.photo_path || null); try { const result = await sendCampaignContent(recipient.telegram_id, message, photoPath); record({ telegramId: recipient.telegram_id, telegramMessageId: result.message_id, direction: "outbound", kind: photoPath ? "photo" : "text", text: `[Тест рассылки] ${message.replace(/<[^>]*>/g, "")}`, scenario: "campaign_test" }); } finally { removeCampaignPhoto(uploadedPhoto); }
+    const message = String(input.message || "").trim(); if (!message) throw new Error("Введите текст рассылки"); if (input.photo && input.video) throw new Error("К рассылке можно прикрепить одно фото или одно видео"); const recipient = db.prepare("SELECT telegram_id FROM customers WHERE lower(username)='ann_miro' AND is_demo=0 LIMIT 1").get(); if (!recipient) throw new Error("Пользователь ann_miro не найден в базе бота"); const campaign = input.campaignId ? db.prepare("SELECT photo_path,video_path FROM campaigns WHERE id=?").get(Number(input.campaignId)) : null; const uploadedPhoto = saveCampaignPhoto(input.photo); const uploadedVideo = saveCampaignVideo(input.video); const removeMedia = Boolean(input.removeMedia || input.removePhoto); const replacingMedia = Boolean(uploadedPhoto || uploadedVideo || removeMedia); const photoPath = replacingMedia ? uploadedPhoto : campaign?.photo_path || null; const videoPath = replacingMedia ? uploadedVideo : campaign?.video_path || null; try { const result = await sendCampaignContent(recipient.telegram_id, message, photoPath, videoPath); record({ telegramId: recipient.telegram_id, telegramMessageId: result.message_id, direction: "outbound", kind: videoPath ? "video" : photoPath ? "photo" : "text", text: `[Тест рассылки] ${message.replace(/<[^>]*>/g, "")}`, scenario: "campaign_test" }); } finally { removeCampaignPhoto(uploadedPhoto); removeCampaignPhoto(uploadedVideo); }
   } else if (input.action === "cancel-campaign") {
     db.prepare("UPDATE campaigns SET status='cancelled',updated_at=? WHERE id=? AND status='scheduled'").run(timestamp, Number(input.campaignId));
   } else if (input.action === "update-scenario-message") {
@@ -342,7 +357,7 @@ async function campaignTick() {
   if (campaign.audience_mode === "tags" && included.length) { query += ` AND EXISTS (SELECT 1 FROM customer_tags ct WHERE ct.customer_id=c.id AND ct.tag_id IN (${included.map(()=>"?").join(",")}))`; values.push(...included); }
   if (excluded.length) { query += ` AND NOT EXISTS (SELECT 1 FROM customer_tags ct WHERE ct.customer_id=c.id AND ct.tag_id IN (${excluded.map(()=>"?").join(",")}))`; values.push(...excluded); }
   let sent = 0; let failed = 0;
-  for (const recipient of db.prepare(query).all(...values)) { try { const result = await sendCampaignContent(recipient.telegram_id, campaign.message, campaign.photo_path); db.prepare("INSERT OR REPLACE INTO deliveries (campaign_id,customer_id,status,error,sent_at) VALUES (?,?,'sent',NULL,?)").run(campaign.id, recipient.id, timestamp); record({ telegramId: recipient.telegram_id, telegramMessageId: result.message_id, direction: "outbound", kind: campaign.photo_path ? "photo" : "text", text: campaign.message.replace(/<[^>]*>/g, ""), scenario: "campaign" }); sent++; } catch (error) { failed++; db.prepare("INSERT OR REPLACE INTO deliveries (campaign_id,customer_id,status,error,sent_at) VALUES (?,?,'failed',?,?)").run(campaign.id, recipient.id, String(error.message || error), timestamp); } }
+  for (const recipient of db.prepare(query).all(...values)) { try { const result = await sendCampaignContent(recipient.telegram_id, campaign.message, campaign.photo_path, campaign.video_path); db.prepare("INSERT OR REPLACE INTO deliveries (campaign_id,customer_id,status,error,sent_at) VALUES (?,?,'sent',NULL,?)").run(campaign.id, recipient.id, timestamp); record({ telegramId: recipient.telegram_id, telegramMessageId: result.message_id, direction: "outbound", kind: campaign.video_path ? "video" : campaign.photo_path ? "photo" : "text", text: campaign.message.replace(/<[^>]*>/g, ""), scenario: "campaign" }); sent++; } catch (error) { failed++; db.prepare("INSERT OR REPLACE INTO deliveries (campaign_id,customer_id,status,error,sent_at) VALUES (?,?,'failed',?,?)").run(campaign.id, recipient.id, String(error.message || error), timestamp); } }
   db.prepare("UPDATE campaigns SET status='sent',sent_count=?,failed_count=?,updated_at=? WHERE id=?").run(sent, failed, now(), campaign.id);
 }
 
