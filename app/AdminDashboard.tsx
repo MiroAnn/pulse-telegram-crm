@@ -78,6 +78,9 @@ type TrackingLink = {
   start_link: string;
   unique_visitors: number;
   total_visits: number;
+  unique_buyers: number;
+  purchases: number;
+  conversion_rate: number;
   last_visit_at: string | null;
   created_at: string;
 };
@@ -455,7 +458,7 @@ function Traffic({ data, action }: { data: Dashboard; action: (payload: Record<s
   }
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">Источники аудитории</span><h1>Ссылки</h1><p>Создавайте отдельную ссылку для каждого поста или площадки и смотрите, сколько людей пришло.</p></div></div>
+    <div className="page-heading"><div><span className="eyebrow">Источники аудитории</span><h1>Ссылки</h1><p>Смотрите переходы, покупки и конверсию. Покупка относится к последней ссылке, открытой до начала оплаты.</p></div></div>
     <div className="traffic-layout">
       <form className="tracking-form" onSubmit={submit}>
         <span className="metric-icon purple">⌁</span><h3>Новая ссылка</h3>
@@ -468,7 +471,7 @@ function Traffic({ data, action }: { data: Dashboard; action: (payload: Record<s
       <div className="tracking-list">
         {data.trackingLinks.length === 0 ? <div className="empty-state"><h3>Ссылок пока нет</h3><p>Создайте первую ссылку для публикации.</p></div> : data.trackingLinks.map((link) => <article className="tracking-row" key={link.id}>
           <div className="tracking-copy"><strong>{link.name}</strong><code>{link.start_link}</code><small>Создана {niceDate(link.created_at)}{link.last_visit_at ? ` · последний переход ${niceDate(link.last_visit_at)}` : " · переходов пока нет"}</small></div>
-          <div className="tracking-stats"><span><strong>{link.unique_visitors}</strong><small>людей</small></span><span><strong>{link.total_visits}</strong><small>переходов</small></span></div>
+          <div className="tracking-stats"><span><strong>{link.unique_visitors}</strong><small>людей</small></span><span><strong>{link.total_visits}</strong><small>переходов</small></span><span className="purchase-stat"><strong>{link.purchases}</strong><small>покупок</small></span><span><strong>{link.conversion_rate}%</strong><small>конверсия</small></span></div>
           <button type="button" className="copy-button" onClick={() => void copy(link)}>{copied === link.id ? "Скопировано" : "Копировать"}</button>
         </article>)}
       </div>

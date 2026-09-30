@@ -109,6 +109,7 @@ h1, h2, h3, p { margin-top:0; }
 .tracking-stats strong, .tracking-stats small { display:block; }
 .tracking-stats strong { font-size:21px; letter-spacing:-.7px; }
 .tracking-stats small { color:#8f8a95; font-size:9px; }
+.tracking-stats .purchase-stat strong { color:#26845f; }
 .copy-button { min-height:35px; padding:0 11px; border:1px solid #ded8f9; border-radius:8px; color:#674fd4; background:#f7f5ff; font-size:10px; font-weight:750; cursor:pointer; }
 .copy-button:hover { background:#efebff; }
 .campaign-list { display:grid; gap:10px; }
