@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS scenario_messages (id INTEGER PRIMARY KEY AUTOINCREME
 CREATE TABLE IF NOT EXISTS scenario_message_tags (message_key TEXT NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(message_key, tag_id));
 CREATE TABLE IF NOT EXISTS scenario_settings (scenario_key TEXT PRIMARY KEY, is_hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS course_chat_settings (setting_key TEXT PRIMARY KEY, chat_id TEXT NOT NULL, title TEXT NOT NULL, configured_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS course_invites (invite_link TEXT PRIMARY KEY, chat_id TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_by TEXT, used_at TEXT, revoked_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id);
@@ -307,12 +308,87 @@ async function setupCourseChat(message) {
     .run(String(chatId), title, String(message.from.id), timestamp, timestamp);
   await telegram("sendMessage", { chat_id: chatId, text: `✅ Чат «${title}» привязан. Теперь бот сможет создавать для него разовые ссылки.` });
 }
+async function isCourseAdministrator(userId, courseChat) {
+  if (String(userId) === String(courseChat.configured_by)) return true;
+  try {
+    const member = await telegram("getChatMember", { chat_id: courseChat.chat_id, user_id: userId });
+    return ['creator', 'administrator'].includes(member.status);
+  } catch {
+    return false;
+  }
+}
+async function createCourseInvite(message) {
+  const chatId = message.chat.id;
+  if (message.chat.type !== "private") {
+    await telegram("sendMessage", { chat_id: chatId, text: "Чтобы ссылка не попала в общий чат, отправьте /link боту в личные сообщения." });
+    return;
+  }
+
+  const courseChat = db.prepare("SELECT * FROM course_chat_settings WHERE setting_key='primary'").get();
+  if (!courseChat) {
+    await telegram("sendMessage", { chat_id: chatId, text: "Чат курса ещё не привязан. Сначала отправьте /setup_course внутри чата курса." });
+    return;
+  }
+  if (!(await isCourseAdministrator(message.from.id, courseChat))) {
+    await telegram("sendMessage", { chat_id: chatId, text: "Команда /link доступна только администраторам чата курса." });
+    return;
+  }
+
+  const createdAt = now();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const invite = await telegram("createChatInviteLink", {
+    chat_id: courseChat.chat_id,
+    name: `course ${message.from.id} ${Date.now()}`.slice(0, 32),
+    expire_date: Math.floor(expiresAt.getTime() / 1000),
+    member_limit: 1,
+  });
+  db.prepare(`INSERT INTO course_invites (invite_link,chat_id,created_by,created_at,expires_at,used_by,used_at,revoked_at)
+    VALUES (?,?,?,?,?,NULL,NULL,NULL)`).run(invite.invite_link, courseChat.chat_id, String(message.from.id), createdAt, expiresAt.toISOString());
+  const expiresText = expiresAt.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  await telegram("sendMessage", {
+    chat_id: chatId,
+    text: `Разовая ссылка для вступления в «${courseChat.title}»:\n\n${invite.invite_link}\n\nОна действует до ${expiresText} по Москве и будет отозвана после первого вступления.`,
+    link_preview_options: { is_disabled: true },
+  });
+}
+async function handleCourseChatMember(update) {
+  const change = update.chat_member;
+  const inviteLink = change?.invite_link?.invite_link;
+  if (!inviteLink) return;
+  const invite = db.prepare("SELECT * FROM course_invites WHERE invite_link=? AND used_at IS NULL").get(inviteLink);
+  if (!invite || String(change.chat.id) !== String(invite.chat_id)) return;
+  const previousStatus = change.old_chat_member?.status;
+  const currentStatus = change.new_chat_member?.status;
+  const joined = ['left', 'kicked'].includes(previousStatus) && !['left', 'kicked'].includes(currentStatus);
+  if (!joined) return;
+
+  const joinedUser = change.new_chat_member.user;
+  const usedAt = now();
+  db.prepare("UPDATE course_invites SET used_by=?,used_at=? WHERE invite_link=? AND used_at IS NULL").run(String(joinedUser.id), usedAt, inviteLink);
+  let revoked = true;
+  try {
+    await telegram("revokeChatInviteLink", { chat_id: invite.chat_id, invite_link: inviteLink });
+    db.prepare("UPDATE course_invites SET revoked_at=? WHERE invite_link=?").run(now(), inviteLink);
+  } catch (error) {
+    revoked = false;
+    console.error("Could not revoke course invite:", error.message || error);
+  }
+  const displayName = joinedUser.username ? `@${joinedUser.username}` : [joinedUser.first_name, joinedUser.last_name].filter(Boolean).join(" ") || String(joinedUser.id);
+  await telegram("sendMessage", {
+    chat_id: invite.created_by,
+    text: revoked
+      ? `✅ ${displayName} вступил(а) в чат курса. Разовая ссылка отозвана.`
+      : `⚠️ ${displayName} вступил(а) в чат курса, но Telegram не подтвердил отзыв ссылки. Проверьте ссылку вручную.`,
+  });
+}
 async function handleUpdate(update) {
+  if (update.chat_member) return handleCourseChatMember(update);
   const callback = update.callback_query; const message = update.message;
   const user = callback?.from || message?.from; const chatId = callback?.message?.chat?.id || message?.chat?.id;
   if (!user || !chatId) return;
   const text = message?.text?.trim() || message?.caption?.trim() || "";
   if (!callback && /^\/setup_course(?:@\w+)?$/i.test(text)) return setupCourseChat(message);
+  if (!callback && /^\/link(?:@\w+)?$/i.test(text)) return createCourseInvite(message);
   if (!callback && /^\/start(?:@\w+)?$/i.test(text)) return;
   upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
   if (callback?.data && callback.message) {
@@ -446,7 +522,7 @@ async function poll() {
   while (true) {
     try {
       if (!webhookCleared) { await telegram("deleteWebhook", { drop_pending_updates: false }); webhookCleared = true; }
-      const updates = await telegram("getUpdates", { offset, timeout: 25, allowed_updates: ["message", "callback_query"] });
+      const updates = await telegram("getUpdates", { offset, timeout: 25, allowed_updates: ["message", "callback_query", "chat_member"] });
       for (const update of updates) {
         offset = update.update_id + 1;
         try { await handleUpdate(update); }
