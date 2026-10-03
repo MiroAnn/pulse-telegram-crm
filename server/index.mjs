@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, 
 CREATE TABLE IF NOT EXISTS scenario_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, message_key TEXT NOT NULL UNIQUE, scenario_key TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, tag_name TEXT, tag_color TEXT NOT NULL DEFAULT 'violet', sort_order INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scenario_message_tags (message_key TEXT NOT NULL, tag_id INTEGER NOT NULL, UNIQUE(message_key, tag_id));
 CREATE TABLE IF NOT EXISTS scenario_settings (scenario_key TEXT PRIMARY KEY, is_hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS course_chat_settings (setting_key TEXT PRIMARY KEY, chat_id TEXT NOT NULL, title TEXT NOT NULL, configured_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_due ON campaigns(status, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_customer_tags_tag ON customer_tags(tag_id, customer_id);
@@ -276,11 +277,42 @@ function tagCustomer(telegramId, name, color) {
   db.prepare("INSERT OR IGNORE INTO tags (name, color) VALUES (?, ?)").run(name, color);
   db.prepare(`INSERT OR IGNORE INTO customer_tags (customer_id, tag_id) SELECT c.id, t.id FROM customers c, tags t WHERE c.telegram_id=? AND t.name=?`).run(telegramId, name);
 }
+async function setupCourseChat(message) {
+  const chatId = message.chat.id;
+  const chatType = message.chat.type;
+  if (!['group', 'supergroup'].includes(chatType)) {
+    await telegram("sendMessage", { chat_id: chatId, text: "Команду /setup_course нужно отправить внутри чата курса «Здоровая спина»." });
+    return;
+  }
+
+  const administrator = await telegram("getChatMember", { chat_id: chatId, user_id: message.from.id });
+  if (!['creator', 'administrator'].includes(administrator.status)) {
+    await telegram("sendMessage", { chat_id: chatId, text: "Привязать чат может только его администратор." });
+    return;
+  }
+
+  const bot = await telegram("getMe");
+  const botMember = await telegram("getChatMember", { chat_id: chatId, user_id: bot.id });
+  const canInvite = botMember.status === "creator" || (botMember.status === "administrator" && botMember.can_invite_users === true);
+  if (!canInvite) {
+    await telegram("sendMessage", { chat_id: chatId, text: "Чат пока не привязан: выдайте боту право приглашать пользователей по ссылке и повторите /setup_course." });
+    return;
+  }
+
+  const timestamp = now();
+  const title = String(message.chat.title || "Здоровая спина");
+  db.prepare(`INSERT INTO course_chat_settings (setting_key,chat_id,title,configured_by,created_at,updated_at)
+    VALUES ('primary',?,?,?,?,?)
+    ON CONFLICT(setting_key) DO UPDATE SET chat_id=excluded.chat_id,title=excluded.title,configured_by=excluded.configured_by,updated_at=excluded.updated_at`)
+    .run(String(chatId), title, String(message.from.id), timestamp, timestamp);
+  await telegram("sendMessage", { chat_id: chatId, text: `✅ Чат «${title}» привязан. Теперь бот сможет создавать для него разовые ссылки.` });
+}
 async function handleUpdate(update) {
   const callback = update.callback_query; const message = update.message;
   const user = callback?.from || message?.from; const chatId = callback?.message?.chat?.id || message?.chat?.id;
   if (!user || !chatId) return;
   const text = message?.text?.trim() || message?.caption?.trim() || "";
+  if (!callback && /^\/setup_course(?:@\w+)?$/i.test(text)) return setupCourseChat(message);
   if (!callback && /^\/start(?:@\w+)?$/i.test(text)) return;
   upsertCustomer(user, message?.contact?.phone_number || null); const telegramId = String(user.id);
   if (callback?.data && callback.message) {
