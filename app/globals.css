@@ -156,6 +156,12 @@ h1, h2, h3, p { margin-top:0; }
 .source-choice strong { font-size:10px; }
 .source-choice small { margin-top:2px; color:#8e8994; font-size:8px; }
 .optional-button-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.nurture-after-campaign { padding:14px; display:flex; align-items:flex-start; gap:11px; border:1px solid #e2dee7; border-radius:12px; background:#fbfafc; cursor:pointer; }
+.nurture-after-campaign.selected { border-color:#9e8def; background:#f6f3ff; }
+.nurture-after-campaign input { margin-top:2px; accent-color:var(--purple); }
+.nurture-after-campaign strong,.nurture-after-campaign small { display:block; }
+.nurture-after-campaign strong { font-size:11px; }
+.nurture-after-campaign small { margin-top:5px; color:#817b87; font-size:9px; line-height:1.5; }
 .campaign-list { display:grid; gap:10px; }
 .campaign-card { padding:17px 18px; display:grid; grid-template-columns:110px minmax(0,1fr) 100px auto; align-items:center; gap:18px; }
 .campaign-status { justify-self:start; border-radius:999px; padding:6px 9px; background:#f3f1f5; font-size:9px; font-weight:750; }.status-scheduled { color:#725bcf; background:#efebff; }.status-sent { color:#2d8063; background:#e7f6ef; }.status-cancelled { color:#8b8790; }
