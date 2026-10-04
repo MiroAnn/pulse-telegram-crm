@@ -90,6 +90,7 @@ type NurtureMessage = {
   message: string;
   delay_minutes: number;
   trigger_param: string;
+  trigger_params: string[];
   button_text: string | null;
   button_url: string | null;
   enabled: number;
@@ -517,7 +518,7 @@ function Nurtures({ data, action }: { data: Dashboard; action: (payload: Record<
     <div className="nurture-list">
       {data.nurtureMessages.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↻</span><h3>Цепочка пока пуста</h3><p>Добавьте первое сообщение и укажите, через сколько времени после /start его отправить.</p><button className="primary-button" onClick={() => setEditor("new")}>Добавить сообщение</button></div> : data.nurtureMessages.map((item, index) => <article className={`nurture-card${item.enabled ? "" : " disabled"}`} key={item.id}>
         <div className="nurture-step"><span>{index + 1}</span><small>через {delayLabel(item.delay_minutes)}</small></div>
-        <div className="nurture-copy"><div><strong>{item.title}</strong><i className={item.enabled ? "nurture-status active" : "nurture-status"}>{item.enabled ? "Включено" : "Выключено"}</i><i className="nurture-source">{item.trigger_param === "main" ? "Все основные ссылки" : data.trackingLinks.find((link) => link.start_param === item.trigger_param)?.name ?? item.trigger_param}</i></div><p>{scenarioPreview(item.message)}</p>{item.button_text && <small>Кнопка: «{item.button_text}»</small>}</div>
+        <div className="nurture-copy"><div><strong>{item.title}</strong><i className={item.enabled ? "nurture-status active" : "nurture-status"}>{item.enabled ? "Включено" : "Выключено"}</i>{(item.trigger_params?.length ? item.trigger_params : [item.trigger_param]).map((param) => <i className="nurture-source" key={param}>{param === "main" ? "Все основные ссылки" : data.trackingLinks.find((link) => link.start_param === param)?.name ?? param}</i>)}</div><p>{scenarioPreview(item.message)}</p>{item.button_text && <small>Кнопка: «{item.button_text}»</small>}</div>
         <div className="nurture-counts"><span><strong>{item.pending_count}</strong><small>ожидают</small></span><span><strong>{item.sent_count}</strong><small>отправлено</small></span></div>
         <div className="nurture-actions"><button className="edit-button" onClick={() => setEditor(item)}>Редактировать</button><button className="secondary-button" onClick={() => void action({ action: "toggle-nurture-message", messageId: item.id, enabled: !item.enabled })}>{item.enabled ? "Выключить" : "Включить"}</button><button className="delete-tag-button" onClick={() => void remove(item)}>Удалить</button></div>
       </article>)}
@@ -533,7 +534,7 @@ function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: Nurture
   const [message, setMessage] = useState(item?.message ?? "");
   const [delayValue, setDelayValue] = useState(String(initialValue));
   const [delayUnit, setDelayUnit] = useState(initialUnit);
-  const [triggerParam, setTriggerParam] = useState(item?.trigger_param ?? "main");
+  const [triggerParams, setTriggerParams] = useState<string[]>(item?.trigger_params?.length ? item.trigger_params : [item?.trigger_param ?? "main"]);
   const [buttonText, setButtonText] = useState(item?.button_text ?? "");
   const [buttonUrl, setButtonUrl] = useState(item?.button_url ?? "");
   const [busy, setBusy] = useState(false);
@@ -541,12 +542,12 @@ function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: Nurture
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     const multiplier = delayUnit === "days" ? 1440 : delayUnit === "hours" ? 60 : 1;
-    try { await onSave({ title, message, delayMinutes: Math.round(Number(delayValue) * multiplier), triggerParam, buttonText, buttonUrl }); }
+    try { await onSave({ title, message, delayMinutes: Math.round(Number(delayValue) * multiplier), triggerParams, buttonText, buttonUrl }); }
     catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить сообщение"); setBusy(false); }
   }
   return <div className="overlay composer-overlay"><form className="composer nurture-editor" onSubmit={submit}><header><div><span className="eyebrow">Шаг цепочки</span><h2>{item ? "Редактировать догрев" : "Новое сообщение"}</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body">
     <label className="field"><span>Название внутри админки</span><input required maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, напоминание через день"/></label>
-    <label className="field"><span>Для какой стартовой ссылки</span><select className="wide-select" value={triggerParam} onChange={(event) => setTriggerParam(event.target.value)}><option value="main">Все основные ссылки</option>{trackingLinks.filter((link) => link.start_param !== "ksenia_kseniastories").map((link) => <option value={link.start_param} key={link.id}>{link.name} — {link.start_param}</option>)}</select></label>
+    <fieldset><legend>Для каких стартовых ссылок</legend><div className="source-choice-grid"><label aria-label="Все основные ссылки" className={triggerParams.includes("main") ? "source-choice selected" : "source-choice"}><input type="checkbox" checked={triggerParams.includes("main")} onChange={() => setTriggerParams((current) => current.includes("main") ? current.filter((value) => value !== "main") : [...current, "main"])}/><span><strong>Все основные ссылки</strong><small>Кроме Interview</small></span></label>{trackingLinks.filter((link) => link.start_param !== "ksenia_kseniastories").map((link) => <label aria-label={`${link.name} — ${link.start_param}`} className={triggerParams.includes(link.start_param) ? "source-choice selected" : "source-choice"} key={link.id}><input type="checkbox" checked={triggerParams.includes(link.start_param)} onChange={() => setTriggerParams((current) => current.includes(link.start_param) ? current.filter((value) => value !== link.start_param) : [...current, link.start_param])}/><span><strong>{link.name}</strong><small>{link.start_param}</small></span></label>)}</div></fieldset>
     <fieldset><legend>Когда отправить после /start</legend><div className="delay-row"><input type="number" required min="1" step="1" value={delayValue} onChange={(event) => setDelayValue(event.target.value)}/><select value={delayUnit} onChange={(event) => setDelayUnit(event.target.value)}><option value="minutes">минут</option><option value="hours">часов</option><option value="days">дней</option></select></div></fieldset>
     <label className="field message-field"><span>Текст сообщения</span><textarea required rows={8} maxLength={4096} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Текст, который получит человек…"/><small>{message.length} / 4096</small></label>
     <div className="optional-button-fields"><label className="field"><span>Текст кнопки — необязательно</span><input value={buttonText} onChange={(event) => setButtonText(event.target.value)} placeholder="Оплатить 5900 руб"/></label><label className="field"><span>Ссылка кнопки</span><input type="url" value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://…"/></label></div>
