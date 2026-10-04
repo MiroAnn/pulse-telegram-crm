@@ -128,6 +128,7 @@ h1, h2, h3, p { margin-top:0; }
 .nurture-copy small { color:#765fd7; font-size:9px; }
 .nurture-status { padding:4px 7px; border-radius:999px; color:#88838e; background:#efedf1; font-size:8px; font-style:normal; font-weight:800; }
 .nurture-status.active { color:#287a5c; background:#e7f6ef; }
+.nurture-source { padding:4px 7px; border-radius:999px; color:#5d4bc0; background:#f0edff; font-size:8px; font-style:normal; font-weight:800; }
 .nurture-counts { display:flex; gap:14px; text-align:center; }
 .nurture-counts strong, .nurture-counts small { display:block; }
 .nurture-counts strong { font-size:17px; }
@@ -137,6 +138,7 @@ h1, h2, h3, p { margin-top:0; }
 .nurture-editor { width:min(760px,96vw); }
 .delay-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .delay-row input, .delay-row select { width:100%; min-height:42px; padding:0 12px; border:1px solid #dfdce4; border-radius:10px; outline:0; background:#fbfafc; font-size:12px; }
+.wide-select { width:100%; min-height:42px; padding:0 12px; border:1px solid #dfdce4; border-radius:10px; outline:0; background:#fbfafc; font-size:12px; }
 .optional-button-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .campaign-list { display:grid; gap:10px; }
 .campaign-card { padding:17px 18px; display:grid; grid-template-columns:110px minmax(0,1fr) 100px auto; align-items:center; gap:18px; }
