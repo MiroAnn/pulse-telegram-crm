@@ -99,6 +99,15 @@ type NurtureMessage = {
   created_at: string;
   updated_at: string;
 };
+type StartContent = {
+  key: string;
+  message: string;
+  button1_text: string | null;
+  button1_url: string | null;
+  button2_text: string | null;
+  button2_url: string | null;
+  updated_at: string;
+};
 type Dashboard = {
   customers: Customer[];
   tags: Tag[];
@@ -107,6 +116,7 @@ type Dashboard = {
   scenarios: Scenario[];
   nurtureMessages: NurtureMessage[];
   trackingLinks: TrackingLink[];
+  startContent: StartContent | null;
   stats: { customers: number; reachable: number; campaigns: number; scheduled: number; unread: number };
 };
 
@@ -118,6 +128,7 @@ const emptyDashboard: Dashboard = {
   scenarios: [],
   nurtureMessages: [],
   trackingLinks: [],
+  startContent: null,
   stats: { customers: 0, reachable: 0, campaigns: 0, scheduled: 0, unread: 0 },
 };
 
@@ -508,12 +519,18 @@ function delayLabel(minutes: number) {
 
 function Nurtures({ data, action }: { data: Dashboard; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
   const [editor, setEditor] = useState<NurtureMessage | "new" | null>(null);
+  const [startEditor, setStartEditor] = useState(false);
   async function remove(item: NurtureMessage) {
     if (!window.confirm(`Удалить сообщение «${item.title}» и всю историю его отправок?`)) return;
     await action({ action: "delete-nurture-message", messageId: item.id });
   }
   return <>
     <div className="page-heading"><div><span className="eyebrow">Автоматическая цепочка</span><h1>Догревы</h1><p>Интервал считается от первого запуска сценария /start. После покупки оставшиеся сообщения автоматически отменяются.</p></div><button className="primary-button" onClick={() => setEditor("new")}>＋ Добавить сообщение</button></div>
+    <article className="start-content-card">
+      <div className="start-content-mark">✦</div>
+      <div className="start-content-copy"><div><span className="eyebrow">Начало цепочки</span><strong>Стартовое сообщение</strong></div><p>{scenarioPreview(data.startContent?.message ?? "Сообщение загружается…")}</p><div className="start-buttons-preview">{data.startContent?.button1_text && <span>{data.startContent.button1_text}</span>}{data.startContent?.button2_text && <span>{data.startContent.button2_text}</span>}</div></div>
+      <button className="edit-button" onClick={() => setStartEditor(true)}>Редактировать</button>
+    </article>
     <div className="nurture-summary"><span className="metric-icon purple">↻</span><div><strong>{data.nurtureMessages.filter((item) => item.enabled).length} активных сообщений</strong><p>Новые участники получают включённые сообщения по порядку времени. Выключение сообщения отменяет его ожидающие отправки.</p></div></div>
     <div className="nurture-list">
       {data.nurtureMessages.length === 0 ? <div className="empty-state tall"><span className="empty-mark">↻</span><h3>Цепочка пока пуста</h3><p>Добавьте первое сообщение и укажите, через сколько времени после /start его отправить.</p><button className="primary-button" onClick={() => setEditor("new")}>Добавить сообщение</button></div> : data.nurtureMessages.map((item, index) => <article className={`nurture-card${item.enabled ? "" : " disabled"}`} key={item.id}>
@@ -523,8 +540,31 @@ function Nurtures({ data, action }: { data: Dashboard; action: (payload: Record<
         <div className="nurture-actions"><button className="edit-button" onClick={() => setEditor(item)}>Редактировать</button><button className="secondary-button" onClick={() => void action({ action: "toggle-nurture-message", messageId: item.id, enabled: !item.enabled })}>{item.enabled ? "Выключить" : "Включить"}</button><button className="delete-tag-button" onClick={() => void remove(item)}>Удалить</button></div>
       </article>)}
     </div>
+    {startEditor && <StartContentEditor content={data.startContent} onClose={() => setStartEditor(false)} onSave={async (payload) => { await action({ action: "update-start-content", ...payload }); setStartEditor(false); }} />}
     {editor && <NurtureEditor item={editor === "new" ? null : editor} trackingLinks={data.trackingLinks} onClose={() => setEditor(null)} onSave={async (payload) => { await action({ action: editor === "new" ? "create-nurture-message" : "update-nurture-message", messageId: editor === "new" ? undefined : editor.id, ...payload }); setEditor(null); }} />}
   </>;
+}
+
+function StartContentEditor({ content, onClose, onSave }: { content: StartContent | null; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void> }) {
+  const [message, setMessage] = useState(content?.message ?? "");
+  const [button1Text, setButton1Text] = useState(content?.button1_text ?? "Оплатить 5900 руб");
+  const [button1Url, setButton1Url] = useState(content?.button1_url ?? "{payment_url}");
+  const [button2Text, setButton2Text] = useState(content?.button2_text ?? "Подробнее");
+  const [button2Url, setButton2Url] = useState(content?.button2_url ?? "https://miroann.github.io/tishetishe/ksenia/");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError("");
+    try { await onSave({ message, button1Text, button1Url, button2Text, button2Url }); }
+    catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить стартовое сообщение"); setBusy(false); }
+  }
+  return <div className="overlay composer-overlay"><form className="composer nurture-editor" onSubmit={submit}><header><div><span className="eyebrow">Начало цепочки</span><h2>Стартовое сообщение</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body">
+    <label className="field message-field"><span>Текст сообщения</span><textarea required rows={12} maxLength={4096} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Первое сообщение после /start…"/><small>{message.length} / 4096</small></label>
+    <fieldset><legend>Кнопка 1</legend><div className="optional-button-fields"><label className="field"><span>Текст кнопки</span><input maxLength={64} value={button1Text} onChange={(event) => setButton1Text(event.target.value)} placeholder="Оплатить 5900 руб"/></label><label className="field"><span>Ссылка</span><input value={button1Url} onChange={(event) => setButton1Url(event.target.value)} placeholder="{payment_url}"/></label></div></fieldset>
+    <fieldset><legend>Кнопка 2</legend><div className="optional-button-fields"><label className="field"><span>Текст кнопки</span><input maxLength={64} value={button2Text} onChange={(event) => setButton2Text(event.target.value)} placeholder="Подробнее"/></label><label className="field"><span>Ссылка</span><input value={button2Url} onChange={(event) => setButton2Url(event.target.value)} placeholder="https://…"/></label></div></fieldset>
+    <p className="editor-hint"><b>Важно:</b> для кнопки оплаты оставьте ссылку <code>{"{payment_url}"}</code>. Бот сам подставит персональную ссылку и сохранит источник покупки. Чтобы убрать кнопку, очистите оба её поля. Поддерживается HTML Telegram: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;a href=&quot;https://…&quot;&gt;ссылка&lt;/a&gt;.</p>
+    {error && <p className="form-error">{error}</p>}
+  </div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></footer></form></div>;
 }
 
 function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: NurtureMessage | null; trackingLinks: TrackingLink[]; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void> }) {
