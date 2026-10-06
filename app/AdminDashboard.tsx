@@ -556,7 +556,7 @@ function Nurtures({ data, action }: { data: Dashboard; action: (payload: Record<
       </article>)}
     </div>
     {startEditor && <StartContentEditor scenarioKey={startEditor} content={data.startContents.find((item) => item.key === startEditor) ?? (startEditor === "main" ? data.startContent : null)} allTags={data.tags} onClose={() => setStartEditor(null)} onSave={async (payload) => { await action({ action: "update-start-content", key: startEditor, ...payload }); setStartEditor(null); }} />}
-    {editor && <NurtureEditor item={editor === "new" ? null : editor} trackingLinks={data.trackingLinks} onClose={() => setEditor(null)} onSave={async (payload) => { await action({ action: editor === "new" ? "create-nurture-message" : "update-nurture-message", messageId: editor === "new" ? undefined : editor.id, ...payload }); setEditor(null); }} />}
+    {editor && <NurtureEditor item={editor === "new" ? null : editor} trackingLinks={data.trackingLinks} onClose={() => setEditor(null)} onTest={async (payload) => { await action({ action: "test-nurture-message", ...payload }); }} onSave={async (payload) => { await action({ action: editor === "new" ? "create-nurture-message" : "update-nurture-message", messageId: editor === "new" ? undefined : editor.id, ...payload }); setEditor(null); }} />}
   </>;
 }
 
@@ -602,7 +602,7 @@ function StartContentEditor({ scenarioKey, content, allTags, onClose, onSave }: 
   </div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></footer></form></div>;
 }
 
-function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: NurtureMessage | null; trackingLinks: TrackingLink[]; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void> }) {
+function NurtureEditor({ item, trackingLinks, onClose, onSave, onTest }: { item: NurtureMessage | null; trackingLinks: TrackingLink[]; onClose: () => void; onSave: (payload: Record<string, unknown>) => Promise<void>; onTest: (payload: Record<string, unknown>) => Promise<void> }) {
   const initialUnit = item && item.delay_minutes % 1440 === 0 ? "days" : item && item.delay_minutes % 60 === 0 ? "hours" : "minutes";
   const initialValue = item ? item.delay_minutes / (initialUnit === "days" ? 1440 : initialUnit === "hours" ? 60 : 1) : 1;
   const [title, setTitle] = useState(item?.title ?? "");
@@ -613,6 +613,8 @@ function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: Nurture
   const [buttonText, setButtonText] = useState(item?.button_text ?? "");
   const [buttonUrl, setButtonUrl] = useState(item?.button_url ?? "");
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testSent, setTestSent] = useState(false);
   const [error, setError] = useState("");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   function insertMarkup(opening: string, closing: string, placeholder: string) {
@@ -629,10 +631,17 @@ function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: Nurture
     setMessage(next); setError(""); window.setTimeout(() => { field?.focus(); field?.setSelectionRange(start, start + next.length - message.length); });
   }
   async function submit(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
+    event.preventDefault(); setBusy(true); setTestSent(false); setError("");
     const multiplier = delayUnit === "days" ? 1440 : delayUnit === "hours" ? 60 : 1;
     try { await onSave({ title, message, delayMinutes: Math.round(Number(delayValue) * multiplier), triggerParams, buttonText, buttonUrl }); }
     catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить сообщение"); setBusy(false); }
+  }
+  async function sendTest() {
+    if (!message.trim()) { setError("Введите текст сообщения"); return; }
+    setTesting(true); setTestSent(false); setError("");
+    try { await onTest({ message, buttonText, buttonUrl }); setTestSent(true); }
+    catch (err) { setError(err instanceof Error ? err.message : "Не удалось отправить тест"); }
+    finally { setTesting(false); }
   }
   return <div className="overlay composer-overlay"><form className="composer nurture-editor" onSubmit={submit}><header><div><span className="eyebrow">Шаг цепочки</span><h2>{item ? "Редактировать догрев" : "Новое сообщение"}</h2></div><button type="button" className="close-button static" onClick={onClose}>×</button></header><div className="composer-body">
     <label className="field"><span>Название внутри админки</span><input required maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Например, напоминание через день"/></label>
@@ -642,8 +651,8 @@ function NurtureEditor({ item, trackingLinks, onClose, onSave }: { item: Nurture
     <fieldset><legend>Быстрая кнопка оплаты</legend><label aria-label="Добавить кнопку оплаты" className={buttonUrl === "{payment_url}" ? "nurture-after-campaign selected" : "nurture-after-campaign"}><input type="checkbox" checked={buttonUrl === "{payment_url}"} onChange={(event) => { if (event.target.checked) { setButtonText("Оплатить 5900 руб"); setButtonUrl("{payment_url}"); } else if (buttonUrl === "{payment_url}") { setButtonText(""); setButtonUrl(""); } }}/><span><strong>Добавить «Оплатить 5900 руб»</strong><small>Каждый получатель получит свою персональную ссылку Prodamus.</small></span></label></fieldset>
     <div className="optional-button-fields"><label className="field"><span>Текст кнопки — необязательно</span><input value={buttonText} onChange={(event) => setButtonText(event.target.value)} placeholder="Оплатить 5900 руб"/></label><label className="field"><span>Ссылка кнопки</span><input value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://… или {payment_url}"/></label></div>
     <p className="editor-hint">Поддерживается HTML Telegram: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;, &lt;a href=&quot;https://…&quot;&gt;ссылка&lt;/a&gt;. Сообщение не отправится тем, кто уже купил.</p>
-    {error && <p className="form-error">{error}</p>}
-  </div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button></footer></form></div>;
+    {testSent && <p className="form-success">Тест отправлен пользователю @ann_miro</p>}{error && <p className="form-error">{error}</p>}
+  </div><footer><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button type="button" className="test-button" disabled={busy || testing} onClick={() => void sendTest()}>{testing ? "Отправляем…" : "Отправить тест @ann_miro"}</button><button className="primary-button" disabled={busy || testing}>{busy ? "Сохраняем…" : "Сохранить"}</button></footer></form></div>;
 }
 
 function Campaigns({ data, onCompose, onEdit, action }: { data: Dashboard; onCompose: () => void; onEdit: (campaign: Campaign) => void; action: (payload: Record<string, unknown>) => Promise<Dashboard> }) {
