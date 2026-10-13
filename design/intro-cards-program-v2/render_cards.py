@@ -93,7 +93,7 @@ def cover():
     draw.text((56, 470), "ПРАКТИЧЕСКИХ", font=fit_font("ПРАКТИЧЕСКИХ", 970, 104), fill=CREAM)
     draw.text((56, 575), "ЗАНЯТИЙ", font=font(116, "ExtraBold"), fill=GREEN)
     body = font(55, "SemiBold")
-    for i, line in enumerate(wrap(draw, "О том, как задавать точные вопросы и вести содержательные диалоги.", body, 930)):
+    for i, line in enumerate(wrap(draw, "О том, как задавать точные вопросы и вести глубокие диалоги.", body, 930)):
         draw.text((56, 820 + i * 68), line, font=body, fill=CREAM)
     card.save(ROOT / "cover.png")
 
@@ -118,14 +118,14 @@ def interview_card():
     draw = ImageDraw.Draw(card)
     header(draw, "06")
     title_lines(draw, ["Интервью:", "все методы", "в одной беседе"], 150, [BLUE, BLACK, BLACK], preferred=80)
-    description(draw, "Все техники сократического диалога в одной живой беседе — и разбор методов.", BLACK, y=1120, preferred=41)
+    description(draw, "Показываем все техники сократического диалога в живой беседе и разбираем ее.", BLACK, y=1120, preferred=41)
     card.save(ROOT / "06.png")
 
 
 cover()
 existing_card("01", CREAM, "01.png", (0, 500, 1080, 1080), ["Как задавать", "вопросы", "правильно?"], [BLACK, BLACK, BLUE], "Базовая модель вопроса: цель, недостающие знания, корректность, проблемность и существенность.", preferred=80, body_y=1095)
 existing_card("02", BLUE, "02.png", (0, 410, 1080, 1080), ["Как глубоко", "понять другого?", "(И себя)"], [CREAM, GREEN, CREAM], "Как выявлять скрытые убеждения и задавать точные проясняющие вопросы — без советов.", light=True, preferred=80, body_y=1100)
-existing_card("03", GREEN, "03.png", (0, 440, 1080, 1070), ["Как дойти до", "сути проблемы?"], [BLACK, BLUE], "Как искать пробелы в логике и мягко подсвечивать внутренние конфликты — без давления.", preferred=84, body_y=1120)
+existing_card("03", GREEN, "03.png", (0, 440, 1080, 1070), ["Как дойти до", "сути проблемы?"], [BLACK, BLUE], "Как искать пробелы в логике и мягко подсвечивать внутренние конфликты.", preferred=84, body_y=1120)
 existing_card("04", BLACK, "04.png", (0, 410, 1080, 1070), ["Как привести", "собеседника", "к инсайту?"], [CREAM, GREEN, GREEN], "Как создавать условия для инсайта, менять угол обзора и помогать увидеть ситуацию по-новому.", light=True, preferred=76, body_y=1100)
 existing_card("05", CREAM, "05.png", (0, 440, 1080, 1080), ["Реконнектинг", "и стратегия", "вопрошания"], [BLUE, BLACK, BLACK], "Как строить цепочку вопросов, удерживать фокус и возвращаться к исходной цели разговора.", preferred=74, body_y=1110)
 interview_card()
