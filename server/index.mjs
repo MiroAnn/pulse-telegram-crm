@@ -163,6 +163,18 @@ async function telegram(method, payload = {}) {
 }
 const photoTypes = new Map([["image/jpeg", "jpg"], ["image/png", "png"], ["image/webp", "webp"]]);
 function saveCampaignPhoto(input) {
+  if (Array.isArray(input)) {
+    if (input.length > 10) throw new Error("В галерее может быть не больше 10 фото");
+    const paths = []; let totalBytes = 0;
+    try {
+      for (const photo of input) {
+        totalBytes += Buffer.from(String(photo?.dataUrl || "").split(",")[1] || "", "base64").length;
+        if (totalBytes > 45_000_000) throw new Error("Все фотографии вместе должны весить не больше 45 МБ");
+        paths.push(saveCampaignPhoto(photo));
+      }
+      return paths.length ? JSON.stringify(paths) : null;
+    } catch (error) { for (const path of paths) removeCampaignPhoto(path); throw error; }
+  }
   if (!input || typeof input !== "object") return null;
   const dataUrl = String(input.dataUrl || "");
   const match = dataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
@@ -174,7 +186,17 @@ function saveCampaignPhoto(input) {
   return path;
 }
 function removeCampaignPhoto(path) {
+  if (typeof path === "string" && path.startsWith("[")) {
+    for (const item of campaignPhotoPaths(path)) removeCampaignPhoto(item);
+    return;
+  }
   if (path && path.startsWith(`${campaignMediaDir}/`) && existsSync(path)) unlinkSync(path);
+}
+function campaignPhotoPaths(value) {
+  if (!value) return [];
+  if (!value.startsWith("[")) return [value];
+  try { const paths = JSON.parse(value); return Array.isArray(paths) ? paths.filter(path => typeof path === "string" && path.startsWith(`${campaignMediaDir}/`)) : []; }
+  catch { return []; }
 }
 function saveCampaignVideo(input) {
   if (!input || typeof input !== "object") return null;
@@ -233,7 +255,24 @@ async function telegramMedia(chatId, method, field, mediaPath, caption = "") {
   throw new Error("Telegram unavailable");
 }
 async function sendCampaignContent(chatId, message, photoPath, videoPath) {
-  const mediaPath = videoPath || photoPath;
+  const photos = campaignPhotoPaths(photoPath);
+  if (!videoPath && photos.length > 1) {
+    const form = new FormData(); form.set("chat_id", String(chatId));
+    const media = [];
+    for (const [index, path] of photos.entries()) {
+      const extension = path.split(".").pop()?.toLowerCase();
+      const contentType = extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg";
+      const field = `photo${index}`;
+      form.append(field, new Blob([readFileSync(path)], { type: contentType }), `photo-${index + 1}.${extension}`);
+      media.push({ type: "photo", media: `attach://${field}` });
+    }
+    form.set("media", JSON.stringify(media));
+    const response = await fetch(`${telegramApiBase}/bot${token}/sendMediaGroup`, { method: "POST", body: form });
+    const result = await response.json();
+    if (!result.ok) throw new Error(result.description || `Telegram ${response.status}`);
+    return telegram("sendMessage", { chat_id: chatId, text: message, parse_mode: "HTML" });
+  }
+  const mediaPath = videoPath || photos[0];
   if (!mediaPath) return telegram("sendMessage", { chat_id: chatId, text: message, parse_mode: "HTML" });
   const method = videoPath ? "sendVideo" : "sendPhoto"; const field = videoPath ? "video" : "photo";
   if (message.length <= 1024) return telegramMedia(chatId, method, field, mediaPath, message);
@@ -443,7 +482,7 @@ function dashboard() {
   const tagsById = new Map(tags.map(t => [Number(t.id), t])); const grouped = new Map();
   for (const link of links) { const list = grouped.get(Number(link.customer_id)) || []; const tag = tagsById.get(Number(link.tag_id)); if (tag) list.push(tag); grouped.set(Number(link.customer_id), list); }
   const customers = db.prepare("SELECT * FROM customers ORDER BY is_demo ASC, datetime(created_at) DESC").all().map(c => ({ ...c, avatar_url: publicAvatar(c.avatar_url), tags: grouped.get(Number(c.id)) || [], quiz: quizzes.get(String(c.telegram_id)) || null }));
-  const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50").all().map(({ photo_path: photoPath, video_path: videoPath, ...campaign }) => ({ ...campaign, has_photo: Boolean(photoPath), has_video: Boolean(videoPath) }));
+  const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY datetime(created_at) DESC LIMIT 50").all().map(({ photo_path: photoPath, video_path: videoPath, ...campaign }) => ({ ...campaign, has_photo: campaignPhotoPaths(photoPath).length > 0, photo_count: campaignPhotoPaths(photoPath).length, has_video: Boolean(videoPath) }));
   const messages = db.prepare("SELECT * FROM (SELECT * FROM chat_messages ORDER BY datetime(created_at) DESC, id DESC LIMIT 1000) ORDER BY datetime(created_at) ASC, id ASC").all();
   const scenarioTags = db.prepare("SELECT smt.message_key,t.id,t.name,t.color FROM scenario_message_tags smt JOIN tags t ON t.id=smt.tag_id ORDER BY t.name").all();
   const scenarioRows = db.prepare("SELECT * FROM scenario_messages ORDER BY scenario_key, sort_order").all().map(message => ({ ...message, tags: scenarioTags.filter(tag => tag.message_key === message.message_key).map(tag => ({ id: tag.id, name: tag.name, color: tag.color })) }));
@@ -454,6 +493,7 @@ function dashboard() {
 }
 function ids(value) { return Array.isArray(value) ? value.map(Number).filter(id => Number.isInteger(id) && id > 0) : []; }
 async function action(input) {
+  if (Array.isArray(input.photos) && input.photos.length) input.photo = input.photos;
   const timestamp = now();
   if (input.action === "create-tag") {
     const name = String(input.name || "").trim(); if (!name) throw new Error("Введите название тега"); db.prepare("INSERT OR IGNORE INTO tags (name,color) VALUES (?,?)").run(name, String(input.color || "violet"));
